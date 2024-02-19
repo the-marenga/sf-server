@@ -1836,6 +1836,7 @@ dependencies = [
  "num-traits",
  "serde",
  "sf-api",
+ "sha1",
  "sqlx",
 ]
 

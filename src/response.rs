@@ -19,6 +19,7 @@ pub enum Error {
     InvalidName,
     CharacterExists,
     BadRequest,
+    WrongPassword
 }
 
 impl Error {
@@ -44,7 +45,7 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn add_str_val(&mut self, val: &str) -> &mut ResponseBuilder {
+    pub fn add_str(&mut self, val: &str) -> &mut ResponseBuilder {
         if !self.key_start {
             self.resp.push('/');
         } else {
@@ -82,6 +83,7 @@ impl Error {
             Error::InvalidName => "name is not available",
             Error::CharacterExists => "character exists",
             Error::BadRequest => "bad request",
+            Error::WrongPassword => "wrong pass"
         }
     }
 }
@@ -94,7 +96,7 @@ impl Responder for Response {
         _req: &actix_web::HttpRequest,
     ) -> HttpResponse<Self::Body> {
         let body = match self {
-            Response::Success => "success".to_string(),
+            Response::Success => "Success:".to_string(),
             Response::Data(d) => d,
             Response::Error(e) => format!("error:{}", e.error_str()),
         };
