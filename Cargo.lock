@@ -1838,6 +1838,7 @@ dependencies = [
  "sf-api",
  "sha1",
  "sqlx",
+ "strum",
 ]
 
 [[package]]

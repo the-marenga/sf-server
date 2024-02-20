@@ -15,3 +15,4 @@ serde = { version = "1.0.196", features = ["derive"] }
 sf-api = "0.1.1"
 sha1 = "0.10.6"
 sqlx = { version = "0.7", features = ["postgres",  "runtime-tokio-native-tls", "chrono", "macros"] }
+strum = { version = "0.26.1", features = ["derive"] }
