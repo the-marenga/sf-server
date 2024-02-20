@@ -5,7 +5,7 @@ use actix_web::{get, rt::spawn, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine;
 use num_traits::FromPrimitive;
 use sf_api::{
-    command::AttributeType,
+    command::{AttributeType, Flag},
     gamestate::{
         character::{Class, Gender, Mount, Race},
         tavern::QuestLocation,
@@ -82,7 +82,9 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     let request = request.trim_matches('|');
 
     let (command_name, command_args) = request.split_once(':').unwrap();
+    println!("Received: {command_name}: {}", command_args);
     let command_args: Vec<_> = command_args.split('/').collect();
+
     let command_args = CommandArguments(command_args);
 
     let mut rng = fastrand::Rng::new();
@@ -92,7 +94,6 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         return BAD_REQUEST;
     }
 
-    println!("Received: {command_name}");
     match command_name {
         "AccountCreate" => {
             let Some(name) = command_args.get_str(0) else {
@@ -228,22 +229,68 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 .build();
         }
         "PlayerGetHallOfFame" => {
-            let mut rb = ResponseBuilder::default();
-            rb.add_key("Ranklistplayer.r");
+            let rank = command_args.get_int(0).unwrap_or_default();
+            let pre = command_args.get_int(2).unwrap_or_default();
+            let post = command_args.get_int(3).unwrap_or_default();
 
-            // TODO: Actually use the args
+            let rank = match rank {
+                1.. => rank,
+                _ => {
+                    let Some(name) = command_args.get_str(1) else {
+                        return BAD_REQUEST;
+                    };
+                    let Ok(Some(rank)) = sqlx::query_scalar!(
+                        "SELECT rank from character \
+                        LEFT JOIN HoFView ON HoFView.id = character.id \
+                        where name = $1",
+                        name
+                    )
+                    .fetch_one(&db)
+                    .await
+                    else {
+                        return BAD_REQUEST;
+                    };
+                    rank
+                }
+            };
 
-            // TODO: fetch rank & stuff
-            let Ok(info) = sqlx::query!("Select name from character where id = $1", player_id)
-                .fetch_one(&db)
-                .await
+            let mut min = rank - pre;
+            let mut max = rank + post;
+
+            while min < 1 {
+                min += 1;
+                max += 1;
+            }
+
+            let Ok(results) = sqlx::query!(
+                "SELECT rank, name, level, honor, class from HoFView LEFT JOIN Character ON character.id = hofview.id where rank <= $1 AND rank >= $2 ORDER BY rank asc LIMIT 30",
+                max,
+                min,
+            )
+            .fetch_all(&db)
+            .await
             else {
                 return BAD_REQUEST;
             };
 
-            let level = 1;
-            rb.add_str(&format!("1,{},1,{},9,;", &info.name, level));
+            let mut players = String::new();
+            for result in results {
+                let player = format!(
+                    "{},{},{},{},{},{},{};",
+                    result.rank.unwrap_or_default(),
+                    &result.name,
+                    "",
+                    result.level,
+                    result.honor,
+                    result.class + 1,
+                    "de"
+                );
+                players.push_str(&player);
+            }
 
+            let mut rb = ResponseBuilder::default();
+            rb.add_key("Ranklistplayer.r");
+            rb.add_str(&players);
             rb.build()
         }
         "PlayerTutorialStatus" => Response::Success,
@@ -689,8 +736,8 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(0); // 579 wheel_spins_today
     resp.add_val(1708336503); // 580  wheel_next_free_spin
 
-    resp.add_val(0); // 581 level
-    resp.add_val(100); // 582 honor
+    resp.add_val(0); // 581 ft level
+    resp.add_val(100); // 582 ft honor
     resp.add_val(0); // 583 rank
     resp.add_val(900); // 584
     resp.add_val(300); // 585
