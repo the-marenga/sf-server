@@ -62,7 +62,10 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         true => (0, DEFAULT_CRYPTO_KEY.to_string()),
         false => {
             match sqlx::query!(
-                "SELECT cryptokey, id FROM character WHERE cryptoid = $1",
+                "SELECT cryptokey, character.id 
+                 FROM character 
+                 LEFT JOIN Logindata on logindata.id = character.logindata
+                 WHERE cryptoid = $1",
                 crypto_id
             )
             .fetch_one(&db)
@@ -145,21 +148,120 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 .map(|_| rng.alphanumeric())
                 .collect();
 
-            let Ok(pid) = sqlx::query_scalar!(
-                "INSERT INTO Character 
-                (mail, PWHash, Name, Class, SessionID, CryptoID, CryptoKey)
-            VALUES ($1, $2, $3, $4, $5, $6, $7) returning ID",
+            let Ok(mut tx) = db.begin().await else {
+                return BAD_REQUEST;
+            };
+
+            let Ok(login_id) = sqlx::query_scalar!(
+                "INSERT INTO LOGINDATA \
+                (mail, pwhash, SessionID, CryptoID, CryptoKey) \
+                VALUES ($1, $2, $3, $4, $5) returning ID",
                 mail,
                 hashed_password,
-                name,
-                class as i32,
                 session_id,
                 crypto_id,
                 crypto_key
             )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return BAD_REQUEST;
+            };
+
+            let mut quests = [0; 3];
+            for i in 0..3 {
+                let Ok(quest_id) = sqlx::query_scalar!(
+                    "INSERT INTO QUEST \
+                    (monster, location, length) \
+                    VALUES ($1, $2, $3) returning ID",
+                    139,
+                    1,
+                    60,
+                )
+                .fetch_one(&mut *tx)
+                .await
+                else {
+                    _ = tx.rollback().await;
+                    return BAD_REQUEST;
+                };
+                quests[i] = quest_id;
+            }
+
+            let Ok(tavern_id) = sqlx::query_scalar!(
+                "INSERT INTO TAVERN \
+                (quest1, quest2, quest3) \
+                VALUES ($1, $2, $3) returning ID",
+                quests[0],
+                quests[1],
+                quests[2],
+            )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return BAD_REQUEST;
+            };
+
+            let Ok(bag_id) =
+                sqlx::query_scalar!("INSERT INTO BAG (pos1) VALUES (NULL) returning ID",)
+                    .fetch_one(&mut *tx)
+                    .await
+            else {
+                _ = tx.rollback().await;
+                return BAD_REQUEST;
+            };
+
+            let Ok(attr_id) = sqlx::query_scalar!(
+                "INSERT INTO Attributes
+                ( Strength, Dexterity, Intelligence, Stamina, Luck ) 
+                VALUES ($1, $2, $3, $4, $5) returning ID",
+                3,
+                6,
+                8,
+                2,
+                4
+            )
             .fetch_one(&db)
             .await
             else {
+                _ = tx.rollback().await;
+                return BAD_REQUEST;
+            };
+
+            let Ok(attr_upgrades) = sqlx::query_scalar!(
+                "INSERT INTO Attributes
+                ( Strength, Dexterity, Intelligence, Stamina, Luck ) 
+                VALUES ($1, $2, $3, $4, $5) returning ID",
+                0,
+                0,
+                0,
+                0,
+                0
+            )
+            .fetch_one(&db)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return BAD_REQUEST;
+            };
+
+            let Ok(pid) = sqlx::query_scalar!(
+                "INSERT INTO Character
+                (Name, Class, Bag, Attributes, AttributesBought, LoginData, Tavern)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) returning ID",
+                name,
+                class as i32,
+                bag_id,
+                attr_id,
+                attr_upgrades,
+                login_id,
+                tavern_id,
+            )
+            .fetch_one(&db)
+            .await
+            else {
+                _ = tx.rollback().await;
                 return BAD_REQUEST;
             };
 
@@ -176,11 +278,16 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return BAD_REQUEST;
             };
 
-            // TODO: Index this
-            let Ok(info) =
-                sqlx::query!("SELECT id, pwhash from character where name ilike $1", name)
-                    .fetch_one(&db)
-                    .await
+            let Ok(info) = sqlx::query!(
+                "
+                    SELECT character.id, pwhash, character.logindata \
+                    FROM character \
+                    LEFT JOIN logindata on logindata.id = character.logindata \
+                    WHERE lower(name) = lower($1)",
+                name
+            )
+            .fetch_one(&db)
+            .await
             else {
                 return BAD_REQUEST;
             };
@@ -201,10 +308,10 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             }
 
             if sqlx::query!(
-                "UPDATE character 
-                    set sessionid = $2, cryptoid = $3
-                    where id = $1",
-                info.id,
+                "UPDATE logindata 
+                set sessionid = $2, cryptoid = $3
+                where id = $1",
+                info.logindata,
                 session_id,
                 crypto_id
             )
@@ -215,7 +322,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return BAD_REQUEST;
             };
 
-            return player_poll(info.id, "accountlogin", &db).await;
+            player_poll(info.id, "accountlogin", &db).await
         }
 
         "AccountSetLanguage" => {
@@ -232,18 +339,26 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             let rank = command_args.get_int(0).unwrap_or_default();
             let pre = command_args.get_int(2).unwrap_or_default();
             let post = command_args.get_int(3).unwrap_or_default();
+            let name = command_args.get_str(1);
 
             let rank = match rank {
                 1.. => rank,
                 _ => {
-                    let Some(name) = command_args.get_str(1) else {
+                    let Some(name) = name else {
                         return BAD_REQUEST;
                     };
+
+                    let Ok(honor) =
+                        sqlx::query_scalar!("SELECT honor from character where name = $1", name)
+                            .fetch_one(&db)
+                            .await
+                    else {
+                        return BAD_REQUEST;
+                    };
+
                     let Ok(Some(rank)) = sqlx::query_scalar!(
-                        "SELECT rank from character \
-                        LEFT JOIN HoFView ON HoFView.id = character.id \
-                        where name = $1",
-                        name
+                        "SELECT count(*) from character where honor >= $1",
+                        honor
                     )
                     .fetch_one(&db)
                     .await
@@ -255,17 +370,19 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
 
             let mut min = rank - pre;
-            let mut max = rank + post;
 
             while min < 1 {
                 min += 1;
-                max += 1;
             }
 
             let Ok(results) = sqlx::query!(
-                "SELECT rank, name, level, honor, class from HoFView LEFT JOIN Character ON character.id = hofview.id where rank <= $1 AND rank >= $2 ORDER BY rank asc LIMIT 30",
-                max,
+                "SELECT id \
+                 FROM CHARACTER \
+                 ORDER BY honor desc, id \
+                 OFFSET $1
+                 LIMIT $2",
                 min,
+                pre + post,
             )
             .fetch_all(&db)
             .await
@@ -274,19 +391,19 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
 
             let mut players = String::new();
-            for result in results {
-                let player = format!(
-                    "{},{},{},{},{},{},{};",
-                    result.rank.unwrap_or_default(),
-                    &result.name,
-                    "",
-                    result.level,
-                    result.honor,
-                    result.class + 1,
-                    "de"
-                );
-                players.push_str(&player);
-            }
+            // for result in results {
+            //     let player = format!(
+            //         "{},{},{},{},{},{},{};",
+            //         result.rank.unwrap_or_default(),
+            //         &result.name,
+            //         "",
+            //         result.level,
+            //         result.honor,
+            //         result.class + 1,
+            //         "de"
+            //     );
+            //     players.push_str(&player);
+            // }
 
             let mut rb = ResponseBuilder::default();
             rb.add_key("Ranklistplayer.r");
@@ -355,9 +472,9 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
 
     let Ok(player) = sqlx::query!(
         "SELECT \
-            character.*, rank \
+            character.*, logindata.sessionid, logindata.cryptoid, logindata.cryptokey \
         FROM CHARACTER \
-        LEFT JOIN HoFView ON HoFView.id = character.id
+        LEFT JOIN logindata on logindata.id = character.logindata \
         WHERE character.id = $1",
         pid
     )
@@ -450,7 +567,18 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(0); // Experience
     resp.add_val(400); // Next Level XP
     resp.add_val(100); // Honor
-    resp.add_val(player.rank.unwrap_or(1)); // Rank
+
+    let Ok(Some(rank)) = sqlx::query_scalar!(
+        "SELECT count(*) from character where honor >= $1",
+        player.honor
+    )
+    .fetch_one(db)
+    .await
+    else {
+        return BAD_REQUEST;
+    };
+
+    resp.add_val(rank); // Rank
 
     resp.add_val(0); // 12?
     resp.add_val(10); // 13?
@@ -1117,16 +1245,6 @@ async fn unhandled(path: web::Path<String>) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let z = spawn(async move {
-        loop {
-            let db = connect_db().await.unwrap();
-            sqlx::query!("REFRESH MATERIALIZED VIEW CONCURRENTLY HoFView")
-                .execute(&db)
-                .await
-                .unwrap();
-        }
-    });
-
     HttpServer::new(|| {
         App::new()
             .wrap(Cors::permissive())
