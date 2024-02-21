@@ -70,7 +70,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     }
 
     let (player_id, crypto_key) = match crypto_id == DEFAULT_CRYPTO_ID {
-        true => (0, DEFAULT_CRYPTO_KEY.to_string()),
+        true => (-1, DEFAULT_CRYPTO_KEY.to_string()),
         false => {
             match sqlx::query!(
                 "SELECT cryptokey, character.id 
@@ -110,7 +110,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
     let mut rng = fastrand::Rng::new();
 
-    if player_id == 0
+    if player_id < 0
         && ![
             "AccountCreate", "AccountLogin", "AccountCheck", "AccountDelete",
         ]
@@ -132,33 +132,56 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             else {
                 return Error::MissingArgument("gender").resp();
             };
-            let Some(portrait) = command_args.get_str(2) else {
+            let Some(portrait) =
+                command_args.get_str(2).and_then(Portrait::parse)
+            else {
                 return Error::MissingArgument("portrait").resp();
             };
 
-            let mut portrait_vals: Vec<u16> = Vec::new();
-            for v in portrait.split(',') {
-                let Ok(opt) = v.parse() else {
-                    return Error::MissingArgument("portait option").resp();
-                };
-                portrait_vals.push(opt);
-            }
+            let Ok(mut tx) = db.begin().await else {
+                return INTERNAL_ERR;
+            };
 
-            if portrait_vals.len() != 9 {
-                return Error::MissingArgument("portait option").resp();
-            }
+            let Ok(portrait_id) = sqlx::query_scalar!(
+                "UPDATE CHARACTER SET gender = $1, race = $2 WHERE id = $3 \
+                 RETURNING portrait",
+                gender as i32 + 1,
+                race as i32,
+                player_id
+            )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
 
-            let mouth = portrait_vals[0];
-            let hair = portrait_vals[1];
-            let eyebrows = portrait_vals[2];
-            let eyes = portrait_vals[3];
-            let beard = portrait_vals[4];
-            let nose = portrait_vals[5];
-            let ears = portrait_vals[6];
-            let extra = portrait_vals[7];
-            let horns = portrait_vals[8];
+            if sqlx::query_scalar!(
+                "UPDATE PORTRAIT SET Mouth = $1, Hair = $2, Brows = $3, Eyes \
+                 = $4, Beards = $5, Nose = $6, Ears = $7, Horns = $8, extra = \
+                 $9 WHERE ID = $10",
+                portrait.mouth,
+                portrait.hair,
+                portrait.eyebrows,
+                portrait.eyes,
+                portrait.beard,
+                portrait.nose,
+                portrait.ears,
+                portrait.horns,
+                portrait.extra,
+                portrait_id
+            )
+            .execute(&mut *tx)
+            .await
+            .is_err()
+            {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
 
-            // TODO: Change
+            if tx.commit().await.is_err() {
+                return INTERNAL_ERR;
+            };
 
             Response::Success
         }
@@ -192,31 +215,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return Error::MissingArgument("class").resp();
             };
 
-            let Some(portrait) = command_args.get_str(6) else {
+            let Some(portrait) =
+                command_args.get_str(6).and_then(Portrait::parse)
+            else {
                 return Error::MissingArgument("portrait").resp();
             };
-
-            let mut portrait_vals: Vec<i32> = Vec::new();
-            for v in portrait.split(',') {
-                let Ok(opt) = v.parse() else {
-                    return Error::MissingArgument("portait option").resp();
-                };
-                portrait_vals.push(opt);
-            }
-
-            if portrait_vals.len() != 9 {
-                return Error::MissingArgument("portait option").resp();
-            }
-
-            let mouth = portrait_vals[0];
-            let hair = portrait_vals[1];
-            let eyebrows = portrait_vals[2];
-            let eyes = portrait_vals[3];
-            let beard = portrait_vals[4];
-            let nose = portrait_vals[5];
-            let ears = portrait_vals[6];
-            let extra = portrait_vals[7];
-            let horns = portrait_vals[8];
 
             if is_invalid_name(name) {
                 return Error::InvalidName.resp();
@@ -340,15 +343,15 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 "INSERT INTO PORTRAIT (Mouth, Hair, Brows, Eyes, Beards, \
                  Nose, Ears, Horns, extra) VALUES ($1, $2, $3, $4, $5, $6, \
                  $7, $8, $9) returning ID",
-                mouth,
-                hair,
-                eyebrows,
-                eyes,
-                beard,
-                nose,
-                ears,
-                horns,
-                extra
+                portrait.mouth,
+                portrait.hair,
+                portrait.eyebrows,
+                portrait.eyes,
+                portrait.beard,
+                portrait.nose,
+                portrait.ears,
+                portrait.horns,
+                portrait.extra
             )
             .fetch_one(&mut *tx)
             .await
@@ -618,6 +621,46 @@ pub(crate) fn sha1_hash(val: &str) -> String {
         result.push_str(&format!("{byte:02x}"));
     }
     result
+}
+
+pub struct Portrait {
+    mouth: i32,
+    hair: i32,
+    eyebrows: i32,
+    eyes: i32,
+    beard: i32,
+    nose: i32,
+    ears: i32,
+    extra: i32,
+    horns: i32,
+}
+
+impl Portrait {
+    pub fn parse(portrait: &str) -> Option<Portrait> {
+        let mut portrait_vals: Vec<i32> = Vec::new();
+        for v in portrait.split(',') {
+            let Ok(opt) = v.parse() else {
+                return None;
+            };
+            portrait_vals.push(opt);
+        }
+
+        if portrait_vals.len() != 9 {
+            return None;
+        }
+
+        Some(Portrait {
+            mouth: portrait_vals[0],
+            hair: portrait_vals[1],
+            eyebrows: portrait_vals[2],
+            eyes: portrait_vals[3],
+            beard: portrait_vals[4],
+            nose: portrait_vals[5],
+            ears: portrait_vals[6],
+            extra: portrait_vals[7],
+            horns: portrait_vals[8],
+        })
+    }
 }
 
 async fn player_poll(
