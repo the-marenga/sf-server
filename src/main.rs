@@ -20,9 +20,9 @@ use strum::EnumCount;
 
 use crate::response::*;
 
+pub mod misc;
 pub mod response;
 
-const BAD_REQUEST: Response = Response::Error(Error::BadRequest);
 const INTERNAL_ERR: Response = Response::Error(Error::Internal);
 
 const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
@@ -31,7 +31,8 @@ const DEFAULT_SESSION_ID: &str = "00000000000000000000000000000000";
 const DEFAULT_CRYPTO_KEY: &str = "[_/$VV&*Qg&)r?~g";
 const SERVER_VERSION: u32 = 2001;
 
-pub async fn connect_db() -> Result<Pool<Postgres>, Box<dyn std::error::Error>> {
+pub async fn connect_db() -> Result<Pool<Postgres>, Box<dyn std::error::Error>>
+{
     Ok(PgPoolOptions::new()
         .max_connections(500)
         .acquire_timeout(Duration::from_secs(10))
@@ -57,7 +58,16 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     let request = &info.req;
     let db = connect_db().await.unwrap();
 
-    let (crypto_id, encrypted_request) = request.split_at(DEFAULT_CRYPTO_ID.len());
+    if request.len() < DEFAULT_CRYPTO_ID.len() + 5 {
+        return Error::BadRequest.resp();
+    }
+
+    let (crypto_id, encrypted_request) =
+        request.split_at(DEFAULT_CRYPTO_ID.len());
+
+    if encrypted_request.is_empty() {
+        return Error::BadRequest.resp();
+    }
 
     let (player_id, crypto_key) = match crypto_id == DEFAULT_CRYPTO_ID {
         true => (0, DEFAULT_CRYPTO_KEY.to_string()),
@@ -81,6 +91,10 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
     let request = decrypt_server_request(encrypted_request, &crypto_key);
 
+    if request.len() < DEFAULT_SESSION_ID.len() + 5 {
+        return Error::BadRequest.resp();
+    }
+
     let (_session_id, request) = request.split_at(DEFAULT_SESSION_ID.len());
     // TODO: Validate session id
 
@@ -98,10 +112,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
     if player_id == 0
         && ![
-            "AccountCreate",
-            "AccountLogin",
-            "AccountCheck",
-            "AccountDelete",
+            "AccountCreate", "AccountLogin", "AccountCheck", "AccountDelete",
         ]
         .contains(&command_name)
     {
@@ -109,6 +120,48 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     }
 
     match command_name {
+        "PlayerSetFace" => {
+            let Some(race) = command_args.get_int(0).and_then(Race::from_i64)
+            else {
+                return Error::MissingArgument("race").resp();
+            };
+            let Some(gender) = command_args
+                .get_int(1)
+                .map(|a| a.saturating_sub(1))
+                .and_then(Gender::from_i64)
+            else {
+                return Error::MissingArgument("gender").resp();
+            };
+            let Some(portrait) = command_args.get_str(2) else {
+                return Error::MissingArgument("portrait").resp();
+            };
+
+            let mut portrait_vals: Vec<u16> = Vec::new();
+            for v in portrait.split(',') {
+                let Ok(opt) = v.parse() else {
+                    return Error::MissingArgument("portait option").resp();
+                };
+                portrait_vals.push(opt);
+            }
+
+            if portrait_vals.len() != 9 {
+                return Error::MissingArgument("portait option").resp();
+            }
+
+            let mouth = portrait_vals[0];
+            let hair = portrait_vals[1];
+            let eyebrows = portrait_vals[2];
+            let eyes = portrait_vals[3];
+            let beard = portrait_vals[4];
+            let nose = portrait_vals[5];
+            let ears = portrait_vals[6];
+            let extra = portrait_vals[7];
+            let horns = portrait_vals[8];
+
+            // TODO: Change
+
+            Response::Success
+        }
         "AccountCreate" => {
             let Some(name) = command_args.get_str(0) else {
                 return Error::MissingArgument("name").resp();
@@ -119,14 +172,15 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             let Some(mail) = command_args.get_str(2) else {
                 return Error::MissingArgument("mail").resp();
             };
-            let Some(_gender) = command_args
+            let Some(gender) = command_args
                 .get_int(3)
                 .map(|a| a.saturating_sub(1))
                 .and_then(Gender::from_i64)
             else {
                 return Error::MissingArgument("gender").resp();
             };
-            let Some(_race) = command_args.get_int(4).and_then(Race::from_i64) else {
+            let Some(race) = command_args.get_int(4).and_then(Race::from_i64)
+            else {
                 return Error::MissingArgument("race").resp();
             };
 
@@ -137,6 +191,32 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             else {
                 return Error::MissingArgument("class").resp();
             };
+
+            let Some(portrait) = command_args.get_str(6) else {
+                return Error::MissingArgument("portrait").resp();
+            };
+
+            let mut portrait_vals: Vec<i32> = Vec::new();
+            for v in portrait.split(',') {
+                let Ok(opt) = v.parse() else {
+                    return Error::MissingArgument("portait option").resp();
+                };
+                portrait_vals.push(opt);
+            }
+
+            if portrait_vals.len() != 9 {
+                return Error::MissingArgument("portait option").resp();
+            }
+
+            let mouth = portrait_vals[0];
+            let hair = portrait_vals[1];
+            let eyebrows = portrait_vals[2];
+            let eyes = portrait_vals[3];
+            let beard = portrait_vals[4];
+            let nose = portrait_vals[5];
+            let ears = portrait_vals[6];
+            let extra = portrait_vals[7];
+            let horns = portrait_vals[8];
 
             if is_invalid_name(name) {
                 return Error::InvalidName.resp();
@@ -164,9 +244,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
 
             let Ok(login_id) = sqlx::query_scalar!(
-                "INSERT INTO LOGINDATA \
-                (mail, pwhash, SessionID, CryptoID, CryptoKey) \
-                VALUES ($1, $2, $3, $4, $5) returning ID",
+                "INSERT INTO LOGINDATA (mail, pwhash, SessionID, CryptoID, \
+                 CryptoKey) VALUES ($1, $2, $3, $4, $5) returning ID",
                 mail,
                 hashed_password,
                 session_id,
@@ -184,9 +263,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
                 let Ok(quest_id) = sqlx::query_scalar!(
-                    "INSERT INTO QUEST \
-                    (monster, location, length) \
-                    VALUES ($1, $2, $3) returning ID",
+                    "INSERT INTO QUEST (monster, location, length) VALUES \
+                     ($1, $2, $3) returning ID",
                     139,
                     1,
                     60,
@@ -201,9 +279,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             }
 
             let Ok(tavern_id) = sqlx::query_scalar!(
-                "INSERT INTO TAVERN \
-                (quest1, quest2, quest3) \
-                VALUES ($1, $2, $3) returning ID",
+                "INSERT INTO TAVERN (quest1, quest2, quest3) VALUES ($1, $2, \
+                 $3) returning ID",
                 quests[0],
                 quests[1],
                 quests[2],
@@ -215,10 +292,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            let Ok(bag_id) =
-                sqlx::query_scalar!("INSERT INTO BAG (pos1) VALUES (NULL) returning ID",)
-                    .fetch_one(&mut *tx)
-                    .await
+            let Ok(bag_id) = sqlx::query_scalar!(
+                "INSERT INTO BAG (pos1) VALUES (NULL) returning ID",
+            )
+            .fetch_one(&mut *tx)
+            .await
             else {
                 _ = tx.rollback().await;
                 return INTERNAL_ERR;
@@ -259,17 +337,18 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
 
             let Ok(portrait_id) = sqlx::query_scalar!(
-                "INSERT INTO PORTRAIT \
-                (Mouth, HairColor, Hair, Brows, Eyes, Beards, Nose, Ears) \
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) returning ID",
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
+                "INSERT INTO PORTRAIT (Mouth, Hair, Brows, Eyes, Beards, \
+                 Nose, Ears, Horns, extra) VALUES ($1, $2, $3, $4, $5, $6, \
+                 $7, $8, $9) returning ID",
+                mouth,
+                hair,
+                eyebrows,
+                eyes,
+                beard,
+                nose,
+                ears,
+                horns,
+                extra
             )
             .fetch_one(&mut *tx)
             .await
@@ -280,24 +359,25 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
             let pid = match sqlx::query_scalar!(
                 "INSERT INTO Character
-                (Name, Class, Attributes, AttributesBought, LoginData, Tavern, Bag, Portrait)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) returning ID",
+                (Name, Class, Attributes, AttributesBought, LoginData, Tavern, \
+                 Bag, Portrait, Gender, Race)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning ID",
                 name,
-                class as i32,
+                class as i32 + 1,
                 attr_id,
                 attr_upgrades,
                 login_id,
                 tavern_id,
                 bag_id,
                 portrait_id,
+                gender as i32 + 1,
+                race as i32
             )
             .fetch_one(&mut *tx)
             .await
             {
                 Ok(pid) => pid,
-                Err(e) => {
-                    println!("{e}");
-                    println!("{portrait_id}");
+                Err(_) => {
                     _ = tx.rollback().await;
                     return INTERNAL_ERR;
                 }
@@ -324,10 +404,9 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
 
             let Ok(info) = sqlx::query!(
-                "SELECT character.id, pwhash, character.logindata \
-                 FROM character \
-                 LEFT JOIN logindata on logindata.id = character.logindata \
-                 WHERE lower(name) = lower($1)",
+                "SELECT character.id, pwhash, character.logindata FROM \
+                 character LEFT JOIN logindata on logindata.id = \
+                 character.logindata WHERE lower(name) = lower($1)",
                 name
             )
             .fetch_one(&db)
@@ -336,7 +415,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            let correct_full_hash = sha1_hash(&format!("{}{login_count}", info.pwhash));
+            let correct_full_hash =
+                sha1_hash(&format!("{}{login_count}", info.pwhash));
             if correct_full_hash != full_hash {
                 return Error::WrongPassword.resp();
             }
@@ -368,17 +448,14 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
             player_poll(info.id, "accountlogin", &db).await
         }
-
         "AccountSetLanguage" => {
             // NONE
             Response::Success
         }
-        "PlayerHelpshiftAuthtoken" => {
-            return ResponseBuilder::default()
-                .add_key("helpshiftauthtoken")
-                .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
-                .build();
-        }
+        "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
+            .add_key("helpshiftauthtoken")
+            .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
+            .build(),
         "PlayerGetHallOfFame" => {
             let rank = command_args.get_int(0).unwrap_or_default();
             let pre = command_args.get_int(2).unwrap_or_default();
@@ -392,16 +469,18 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                         return Error::MissingArgument("name or rank").resp();
                     };
 
-                    let Ok(info) =
-                        sqlx::query!("SELECT honor, id from character where name = $1", name)
-                            .fetch_one(&db)
-                            .await
+                    let Ok(info) = sqlx::query!(
+                        "SELECT honor, id from character where name = $1", name
+                    )
+                    .fetch_one(&db)
+                    .await
                     else {
                         return INTERNAL_ERR;
                     };
 
                     let Ok(Some(rank)) = sqlx::query_scalar!(
-                        "SELECT count(*) from character where honor > $1 OR honor = $1 AND id <= $2",
+                        "SELECT count(*) from character where honor > $1 OR \
+                         honor = $1 AND id <= $2",
                         info.honor,
                         info.id
                     )
@@ -418,10 +497,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             let limit = (pre + post).min(30);
 
             let Ok(results) = sqlx::query!(
-                "SELECT id, level, name, class, honor \
-                 FROM CHARACTER \
-                 ORDER BY honor desc, id \
-                 OFFSET $1
+                "SELECT id, level, name, class, honor FROM CHARACTER ORDER BY \
+                 honor desc, id OFFSET $1
                  LIMIT $2",
                 offset,
                 limit,
@@ -441,7 +518,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                     "",
                     result.level,
                     result.honor,
-                    result.class + 1,
+                    result.class,
                     ""
                 );
                 players.push_str(&player);
@@ -466,10 +543,9 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return Error::MissingArgument("mail").resp();
             };
             let Ok(info) = sqlx::query!(
-                "SELECT character.id, pwhash \
-                 FROM character \
-                 LEFT JOIN logindata on logindata.id = character.logindata \
-                 WHERE lower(name) = lower($1)",
+                "SELECT character.id, pwhash FROM character LEFT JOIN \
+                 logindata on logindata.id = character.logindata WHERE \
+                 lower(name) = lower($1)",
                 name,
             )
             .fetch_one(&db)
@@ -478,7 +554,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            let correct_full_hash = sha1_hash(&format!("{}{login_count}", info.pwhash));
+            let correct_full_hash =
+                sha1_hash(&format!("{}{login_count}", info.pwhash));
             if correct_full_hash != full_hash {
                 return Error::WrongPassword.resp();
             }
@@ -495,33 +572,36 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         "Poll" => player_poll(player_id, "poll", &db).await,
         "AccountCheck" => {
             let Some(name) = command_args.get_str(0) else {
-                return Error::MissingArgument("name").resp();                ;
+                return Error::MissingArgument("name").resp();
             };
 
             if is_invalid_name(name) {
                 return Error::InvalidName.resp();
             }
 
-            let count = sqlx::query_scalar!("SELECT COUNT(*) FROM CHARACTER WHERE name = $1", name)
-                .fetch_one(&db)
-                .await
-                .unwrap()
-                .unwrap_or_default();
+            let Ok(count) = sqlx::query_scalar!(
+                "SELECT COUNT(*) FROM CHARACTER WHERE name = $1", name
+            )
+            .fetch_one(&db)
+            .await
+            else {
+                return INTERNAL_ERR;
+            };
 
-            if count == 0 {
-                return ResponseBuilder::default()
+            match count {
+                Some(0) => ResponseBuilder::default()
                     .add_key("serverversion")
                     .add_val(SERVER_VERSION)
                     .add_key("preregister")
                     .add_val(0)
                     .add_val(0)
-                    .build();
+                    .build(),
+                _ => Error::CharacterExists.resp(),
             }
-            Error::CharacterExists.resp()
         }
         _ => {
             println!("Unknown command: {command_name} - {:?}", command_args);
-            Error::BadRequest.resp()
+            Error::UnknownRequest.resp()
         }
     }
 }
@@ -540,7 +620,11 @@ pub(crate) fn sha1_hash(val: &str) -> String {
     result
 }
 
-async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response {
+async fn player_poll(
+    pid: i32,
+    tracking: &str,
+    db: &Pool<Postgres>,
+) -> Response {
     let mut builder = ResponseBuilder::default();
     let resp = builder
         .add_key("serverversion")
@@ -551,11 +635,16 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
         .skip_key();
 
     let Ok(player) = sqlx::query!(
-        "SELECT \
-            character.*, logindata.sessionid, logindata.cryptoid, logindata.cryptokey \
-        FROM CHARACTER \
-        LEFT JOIN logindata on logindata.id = character.logindata \
-        WHERE character.id = $1",
+        "SELECT character.*, logindata.sessionid, logindata.cryptoid, 
+            logindata.cryptokey, logindata.logincount, 
+            portrait.mouth, portrait.Hair, portrait.Brows, portrait.Eyes, \
+         portrait.Beards, portrait.Nose, portrait.Ears, portrait.Extra, \
+         portrait.Horns, tavern.tfa, tavern.BeerDrunk, tavern.QuickSand, \
+         tavern.DiceGamesRemaining, tavern.DiceGameNextFree
+        FROM CHARACTER LEFT JOIN logindata on logindata.id = \
+         character.logindata LEFT JOIN portrait on portrait.id = \
+         character.portrait LEFT JOIN tavern on tavern.id = character.tavern \
+         WHERE character.id = $1",
         pid
     )
     .fetch_one(db)
@@ -564,8 +653,8 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
         return Error::BadRequest.resp();
     };
 
-    let calendar_info =
-        "12/1/8/1/3/1/25/1/5/1/2/1/3/2/1/1/24/1/18/5/6/1/22/1/7/1/6/2/8/2/22/2/5/2/2/2/3/3/21/1";
+    let calendar_info = "12/1/8/1/3/1/25/1/5/1/2/1/3/2/1/1/24/1/18/5/6/1/22/1/\
+                         7/1/6/2/8/2/22/2/5/2/2/2/3/3/21/1";
 
     resp.add_key("messagelist.r");
     resp.add_str(";");
@@ -577,7 +666,7 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_str(";");
 
     resp.add_key("login count");
-    resp.add_val(1);
+    resp.add_val(player.logincount);
 
     resp.skip_key();
 
@@ -585,7 +674,11 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_str(&player.sessionid);
 
     resp.add_key("languagecodelist");
-    resp.add_str("ru,20;fi,8;ar,1;tr,23;nl,16;  ,0;ja,14;it,13;sk,21;fr,9;ko,15;pl,17;cs,2;el,5;da,3;en,6;hr,10;de,4;zh,24;sv,22;hu,11;pt,12;es,7;pt-br,18;ro,19;");
+    resp.add_str(
+        "ru,20;fi,8;ar,1;tr,23;nl,16;  \
+         ,0;ja,14;it,13;sk,21;fr,9;ko,15;pl,17;cs,2;el,5;da,3;en,6;hr,10;de,4;\
+         zh,24;sv,22;hu,11;pt,12;es,7;pt-br,18;ro,19;",
+    );
 
     resp.add_key("languagecodelist.r");
 
@@ -643,20 +736,21 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(1292388336);
     resp.add_val(0);
     resp.add_val(0);
-    resp.add_val(5); // Level & arena
-    resp.add_val(0); // Experience
+    resp.add_val(player.level); // Level & arena
+    resp.add_val(player.experience); // Experience
     resp.add_val(400); // Next Level XP
-    resp.add_val(100); // Honor
+    resp.add_val(player.honor); // Honor
 
     let Ok(Some(rank)) = sqlx::query_scalar!(
-        "SELECT count(*) from character where honor > $1 OR honor = $1 AND ID <= $2",
+        "SELECT count(*) from character where honor > $1 OR honor = $1 AND ID \
+         <= $2",
         player.honor,
         pid
     )
     .fetch_one(db)
     .await
     else {
-        return BAD_REQUEST;
+        return INTERNAL_ERR;
     };
 
     resp.add_val(rank); // Rank
@@ -668,34 +762,33 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(0); // 16?
 
     // Portrait start
-    resp.add_val(2); // 17?
-    resp.add_val(305); // 18?
-    resp.add_val(305); // 19?
-    resp.add_val(3); // 20?
-    resp.add_val(302); // 21?
-    resp.add_val(3); // 22?
-    resp.add_val(5); // 23?
-    resp.add_val(12); // 24?
-    resp.add_val(0); // 25?
+    resp.add_val(player.mouth);
+    resp.add_val(player.hair);
+    resp.add_val(player.brows);
+    resp.add_val(player.eyes);
+    resp.add_val(player.beards);
+    resp.add_val(player.nose);
+    resp.add_val(player.ears);
+    resp.add_val(player.extra);
+    resp.add_val(player.horns);
     resp.add_val(30); // 26?
-    resp.add_val(Race::DarkElf as i32); // Race
-    resp.add_val(2); // Gender & Mirror
-
-    resp.add_val(Class::Assassin as i32 + 1); // Class
+    resp.add_val(player.race);
+    resp.add_val(player.gender); // Gender & Mirror
+    resp.add_val(player.class);
 
     // Attributes
     for _ in 0..AttributeType::COUNT {
-        resp.add_val(100); //30..=34
+        resp.add_val(100); // 30..=34
     }
 
     // attribute_additions (aggregate from equipment)
     for _ in 0..AttributeType::COUNT {
-        resp.add_val(0); //35..=38
+        resp.add_val(0); // 35..=38
     }
 
     // attribute_times_bought
     for _ in 0..AttributeType::COUNT {
-        resp.add_val(0); //40..=44
+        resp.add_val(0); // 40..=44
     }
 
     resp.add_val(0); // Current action
@@ -716,32 +809,32 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
         }
     }
 
-    resp.add_val(in_seconds(60 * 60)); //228
+    resp.add_val(in_seconds(60 * 60)); // 228
 
     // Ok, so Flavour 1, Flavour 2 & Monster ID decide =>
     // - The Line they say
     // - the quest name
     // - the quest giver
 
-    resp.add_val(4); //229 Quest1 Flavour1
-    resp.add_val(4); //230 Quest2 Flavour1
-    resp.add_val(4); //231 Quest3 Flavour1
+    resp.add_val(4); // 229 Quest1 Flavour1
+    resp.add_val(4); // 230 Quest2 Flavour1
+    resp.add_val(4); // 231 Quest3 Flavour1
 
-    resp.add_val(4); //232 Quest1 Flavour2
-    resp.add_val(4); //233 Quest2 Flavour2
-    resp.add_val(4); //234 Quest3 Flavour2
+    resp.add_val(4); // 232 Quest1 Flavour2
+    resp.add_val(4); // 233 Quest2 Flavour2
+    resp.add_val(4); // 234 Quest3 Flavour2
 
-    resp.add_val(-139); //235 quest 1 monster
-    resp.add_val(-139); //236 quest 2 monster
-    resp.add_val(-139); //237 quest 3 monster
+    resp.add_val(-139); // 235 quest 1 monster
+    resp.add_val(-139); // 236 quest 2 monster
+    resp.add_val(-139); // 237 quest 3 monster
 
-    resp.add_val(QuestLocation::SkullIsland as i32); //238 quest 1 location
-    resp.add_val(QuestLocation::SkullIsland as i32); //239 quest 2 location
-    resp.add_val(QuestLocation::SkullIsland as i32); //240 quest 3 location
+    resp.add_val(QuestLocation::SkullIsland as i32); // 238 quest 1 location
+    resp.add_val(QuestLocation::SkullIsland as i32); // 239 quest 2 location
+    resp.add_val(QuestLocation::SkullIsland as i32); // 240 quest 3 location
 
-    resp.add_val(5); //241 quest 1 length
-    resp.add_val(5); //242 quest 2 length
-    resp.add_val(5); //243 quest 3 length
+    resp.add_val(5); // 241 quest 1 length
+    resp.add_val(5); // 242 quest 2 length
+    resp.add_val(5); // 243 quest 3 length
 
     // Quest 1..=3 items
     for _ in 0..3 {
@@ -803,8 +896,8 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(0); // 453
     resp.add_val(0); // 454
     resp.add_val(1708336503); // 455
-    resp.add_val(3000); // 456 Alu secs
-    resp.add_val(1); // 457 Beer drunk
+    resp.add_val(player.tfa); // 456 Alu secs
+    resp.add_val(player.beerdrunk); // 457 Beer drunk
     resp.add_val(0); // 458
     resp.add_val(0); // 459 dungeon_timer
     resp.add_val(1708336503); // 460 Next free fight
@@ -841,7 +934,8 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
 
     resp.add_val(0); // 491 aura_level (0 == locked)
     resp.add_val(0); // 492 aura_now
-                     // Active potions
+
+    // Active potions
     for _ in 0..3 {
         resp.add_val(0); // typ & size
     }
@@ -1130,11 +1224,11 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_str(""); // 758
 
     resp.add_key("resources");
-    resp.add_val(pid); //player_id
-    resp.add_val(1000); // mushrooms
-    resp.add_val(10000000); // silver
+    resp.add_val(pid); // player_id
+    resp.add_val(player.mushrooms); // mushrooms
+    resp.add_val(player.silver); // silver
     resp.add_val(0); // lucky coins
-    resp.add_val(100); // quicksand glasses
+    resp.add_val(player.quicksand); // quicksand glasses
     resp.add_val(0); // wood
     resp.add_val(0); // ??
     resp.add_val(0); // stone
@@ -1153,8 +1247,16 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_key("ownplayername.r");
     resp.add_str(&player.name);
 
+    let Ok(Some(maxrank)) =
+        sqlx::query_scalar!("SELECT count(*) from character",)
+            .fetch_one(db)
+            .await
+    else {
+        return INTERNAL_ERR;
+    };
+
     resp.add_key("maxrank");
-    resp.add_val(1);
+    resp.add_val(maxrank);
 
     resp.add_key("skipallow");
     resp.add_val(0);
@@ -1170,7 +1272,11 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(to_seconds(Local::now()));
 
     resp.add_key("fortressprice.fortressPrice(13)");
-    resp.add_str("900/1000/0/0/900/500/35/12/900/200/0/0/900/300/22/0/900/1500/50/17/900/700/7/9/900/500/41/7/900/400/20/14/900/600/61/20/900/2500/40/13/900/400/25/8/900/15000/30/13/0/0/0/0");
+    resp.add_str(
+        "900/1000/0/0/900/500/35/12/900/200/0/0/900/300/22/0/900/1500/50/17/\
+         900/700/7/9/900/500/41/7/900/400/20/14/900/600/61/20/900/2500/40/13/\
+         900/400/25/8/900/15000/30/13/0/0/0/0",
+    );
 
     resp.skip_key();
 
@@ -1224,7 +1330,15 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_str("5/1702656000/1703620800/1703707200");
 
     resp.add_key("achievement(208)");
-    resp.add_str("0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/");
+    resp.add_str(
+        "0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
+         0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
+         0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
+         0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
+         0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
+         0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
+         0/0/0/0/",
+    );
 
     resp.add_key("scrapbook.r");
     resp.add_str("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
@@ -1249,7 +1363,10 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.skip_key();
 
     resp.add_key("dailytasklist");
-    resp.add_str("6/1/0/10/1/3/0/10/1/4/0/20/1/1/0/3/2/4/0/1/2/1/0/1/2/4/0/5/2/14/0/3/4/25/0/3/4");
+    resp.add_str(
+        "6/1/0/10/1/3/0/10/1/4/0/20/1/1/0/3/2/4/0/1/2/1/0/1/2/4/0/5/2/14/0/3/\
+         4/25/0/3/4",
+    );
 
     resp.add_key("eventtasklist");
     resp.add_str("54/0/20/1/79/0/50/1/71/0/30/1/72/0/5/1");
@@ -1267,11 +1384,15 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
 
     resp.add_key("dungeonprogresslight(30)");
     resp.add_str(
-        "-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/0/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/",
+        "-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/0/-1/-1/-1/-1/-1/\
+         -1/-1/-1/-1/-1/-1/-1/",
     );
 
     resp.add_key("ungeonprogressshadow(30)");
-    resp.add_str("-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/");
+    resp.add_str(
+        "-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/\
+         -1/-1/-1/-1/-1/-1/-1/",
+    );
 
     resp.add_key("dungeonenemieslight(6)");
     resp.add_str("400/15/2/401/15/2/402/15/2/550/18/0/551/18/0/552/18/0/");
@@ -1315,6 +1436,7 @@ fn is_invalid_name(name: &str) -> bool {
         || name.len() > 20
         || name.starts_with(' ')
         || name.ends_with(' ')
+        || name.chars().all(|a| a.is_ascii_digit())
         || name.chars().any(|a| !(a.is_alphanumeric() || a == ' '))
 }
 

@@ -89,7 +89,9 @@ impl Error {
             Error::WrongPassword => "wrong pass",
             Error::InvalidAuth => "command requires valid session",
             Error::UnknownRequest => "unknown request",
-            Error::MissingArgument(name) => return format!("command missing argument: {name}"),
+            Error::MissingArgument(name) => {
+                return format!("command missing argument: {name}")
+            }
             Error::Internal => "internal server error",
         }
         .to_string()
@@ -99,7 +101,10 @@ impl Error {
 impl Responder for Response {
     type Body = actix_web::body::BoxBody;
 
-    fn respond_to(self, _req: &actix_web::HttpRequest) -> HttpResponse<Self::Body> {
+    fn respond_to(
+        self,
+        _req: &actix_web::HttpRequest,
+    ) -> HttpResponse<Self::Body> {
         let body = match self {
             Response::Success => "Success:".to_string(),
             Response::Data(d) => d,

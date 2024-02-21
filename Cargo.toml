@@ -6,11 +6,13 @@ edition = "2021"
 [dependencies]
 actix-cors = "0.7.0"
 actix-web = "4"
+aho-corasick = "1.1.2"
 base64 = "0.21.7"
 fastrand = "2.0.1"
 libaes = "0.7.0"
 num-derive = "0.4.2"
 num-traits = "0.2.18"
+once_cell = "1.19.0"
 serde = { version = "1.0.196", features = ["derive"] }
 sf-api = "0.1.1"
 sha1 = "0.10.6"

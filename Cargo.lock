@@ -1829,11 +1829,13 @@ version = "0.1.0"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "aho-corasick",
  "base64",
  "fastrand",
  "libaes",
  "num-derive",
  "num-traits",
+ "once_cell",
  "serde",
  "sf-api",
  "sha1",
