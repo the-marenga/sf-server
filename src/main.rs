@@ -7,13 +7,13 @@ use num_traits::FromPrimitive;
 use sf_api::{
     command::AttributeType,
     gamestate::{
-        character::{Class, Gender, Mount, Race},
+        character::{Class, Gender, Race},
         tavern::QuestLocation,
     },
 };
 use sqlx::{
     postgres::PgPoolOptions,
-    types::chrono::{DateTime, Local, NaiveDateTime},
+    types::chrono::{Local, NaiveDateTime},
     Pool, Postgres,
 };
 use strum::EnumCount;
@@ -670,7 +670,28 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
             player_poll(player_id, "", &db).await
         }
-        "PlayerTutorialStatus" => Response::Success,
+        "PlayerTutorialStatus" => {
+            let Some(status) = command_args.get_int(0) else {
+                return Error::MissingArgument("tutorial status").resp();
+            };
+
+            if !(0..=0xFFFFFFF).contains(&status) {
+                return Error::BadRequest.resp();
+            }
+
+            if sqlx::query!(
+                "UPDATE CHARACTER SET tutorialstatus = $1 WHERE ID = $2",
+                status as i32, player_id,
+            )
+            .execute(&db)
+            .await
+            .is_err()
+            {
+                return INTERNAL_ERR;
+            };
+
+            Response::Success
+        }
         "Poll" => player_poll(player_id, "poll", &db).await,
         "AccountCheck" => {
             let Some(name) = command_args.get_str(0) else {
@@ -1208,7 +1229,7 @@ async fn player_poll(
     resp.add_val(0); // 594 gem_stone_target
     resp.add_val(0); // 595 gem_search_finish
     resp.add_val(0); // 596 gem_search_began
-    resp.add_val(0xFFFFFFF); // 597 Pretty sure this is a bit map of which messages have been seen
+    resp.add_val(player.tutorialstatus); // 597 Pretty sure this is a bit map of which messages have been seen
     resp.add_val(0); // 598
 
     // Arena enemies
@@ -1263,9 +1284,9 @@ async fn player_poll(
     resp.add_val(0); // 646
     resp.add_val(0); // 647
     resp.add_val(0); // 648
-    resp.add_val(1708387201); // 649 calendar_next_possible
-    resp.add_val(0); // 650 dice_games_next_free
-    resp.add_val(10); // 651 dice_games_remaining
+    resp.add_val(in_seconds(60 * 60)); // 649 calendar_next_possible
+    resp.add_val(to_seconds_opt(player.dicegamenextfree)); // 650 dice_games_next_free
+    resp.add_val(player.dicegamesremaining); // 651 dice_games_remaining
     resp.add_val(0); // 652
     resp.add_val(0); // 653 druid mask
     resp.add_val(0); // 654
@@ -1578,6 +1599,12 @@ fn in_seconds(secs: u64) -> i64 {
 }
 
 fn to_seconds(a: NaiveDateTime) -> i64 {
+    let b = NaiveDateTime::from_timestamp_opt(0, 0).unwrap();
+    (a - b).num_seconds()
+}
+
+fn to_seconds_opt(a: Option<NaiveDateTime>) -> i64 {
+    let Some(a) = a else { return 0 };
     let b = NaiveDateTime::from_timestamp_opt(0, 0).unwrap();
     (a - b).num_seconds()
 }
