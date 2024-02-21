@@ -23,6 +23,7 @@ pub enum Error {
     InvalidAuth,
     MissingArgument(&'static str),
     Internal,
+    NotEnoughMoney,
 }
 
 impl Error {
@@ -93,6 +94,7 @@ impl Error {
                 return format!("command missing argument: {name}")
             }
             Error::Internal => "internal server error",
+            Error::NotEnoughMoney => "need more gold",
         }
         .to_string()
     }

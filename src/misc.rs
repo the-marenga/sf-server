@@ -45,23 +45,6 @@ fn pattern_replace<const FROM: bool>(str: &str) -> String {
     String::from_utf8(wtr).unwrap_or_default()
 }
 
-pub(crate) fn parse_vec<B: Display + Copy + std::fmt::Debug, T, F>(
-    data: &[B],
-    name: &'static str,
-    func: F,
-) -> Result<Vec<T>, SFError>
-where
-    F: Fn(B) -> Option<T>,
-{
-    data.iter()
-        .map(|a| {
-            func(*a).ok_or_else(|| {
-                SFError::ParsingError(name, format!("{:?}", data))
-            })
-        })
-        .collect()
-}
-
 /// The mappings to convert between a normal and a sf string
 const fn sf_str_lookups(
 ) -> (&'static [&'static str; 11], &'static [&'static str; 11]) {

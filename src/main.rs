@@ -18,7 +18,10 @@ use sqlx::{
 };
 use strum::EnumCount;
 
-use crate::response::*;
+use crate::{
+    misc::{from_sf_string, to_sf_string},
+    response::*,
+};
 
 pub mod misc;
 pub mod response;
@@ -360,11 +363,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            let pid = match sqlx::query_scalar!(
+            if sqlx::query_scalar!(
                 "INSERT INTO Character
                 (Name, Class, Attributes, AttributesBought, LoginData, Tavern, \
                  Bag, Portrait, Gender, Race)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning ID",
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                 name,
                 class as i32 + 1,
                 attr_id,
@@ -376,14 +379,12 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 gender as i32 + 1,
                 race as i32
             )
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await
+            .is_err()
             {
-                Ok(pid) => pid,
-                Err(_) => {
-                    _ = tx.rollback().await;
-                    return INTERNAL_ERR;
-                }
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
             };
 
             if tx.commit().await.is_err() {
@@ -454,6 +455,25 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         "AccountSetLanguage" => {
             // NONE
             Response::Success
+        }
+        "PlayerSetDescription" => {
+            let Some(description) = command_args.get_str(0) else {
+                return Error::MissingArgument("name").resp();
+            };
+
+            let description = from_sf_string(description);
+
+            if sqlx::query!(
+                "UPDATE Character SET description = $1 WHERE id = $2",
+                &description, player_id
+            )
+            .execute(&db)
+            .await
+            .is_err()
+            {
+                return INTERNAL_ERR;
+            };
+            player_poll(player_id, "", &db).await
         }
         "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
             .add_key("helpshiftauthtoken")
@@ -570,6 +590,85 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 Ok(_) => Response::Success,
                 Err(_) => INTERNAL_ERR,
             }
+        }
+        "PlayerMountBuy" => {
+            let Some(mount) = command_args.get_int(0) else {
+                return Error::MissingArgument("mount").resp();
+            };
+            let mount = mount as i32;
+
+            let Ok(mut tx) = db.begin().await else {
+                return INTERNAL_ERR;
+            };
+
+            let Ok(player) = sqlx::query!(
+                "SELECT silver, mushrooms, mount, mountend FROM CHARACTER \
+                 WHERE id = $1",
+                player_id
+            )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
+
+            let mut silver = player.silver;
+            let mut mushrooms = player.mushrooms;
+
+            let price = match mount {
+                0 => 0,
+                1 => 100,
+                2 => 500,
+                3 => 0,
+                4 => 0, // TODO: Reward
+                _ => {
+                    return Error::BadRequest.resp();
+                }
+            };
+
+            let mush_price = match mount {
+                3 => 1,
+                4 => 25,
+                _ => 0,
+            };
+            if mushrooms < mush_price {
+                return Error::NotEnoughMoney.resp();
+            }
+            mushrooms -= mush_price;
+
+            if silver < price {
+                return Error::NotEnoughMoney.resp();
+            }
+            silver -= price;
+
+            let now = Local::now().naive_local();
+            let mount_start = match player.mountend {
+                Some(x) if player.mount == mount => now.max(x),
+                _ => now,
+            };
+
+            if sqlx::query!(
+                "UPDATE Character SET mount = $1, mountend = $2, mushrooms = \
+                 $4, silver = $5 WHERE id = $3",
+                mount,
+                mount_start + Duration::from_secs(60 * 60 * 24 * 14),
+                player_id,
+                mushrooms,
+                silver,
+            )
+            .execute(&mut *tx)
+            .await
+            .is_err()
+            {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
+
+            if tx.commit().await.is_err() {
+                return INTERNAL_ERR;
+            };
+            player_poll(player_id, "", &db).await
         }
         "PlayerTutorialStatus" => Response::Success,
         "Poll" => player_poll(player_id, "poll", &db).await,
@@ -894,7 +993,17 @@ async fn player_poll(
     resp.add_val(2000); // 284 quest 2 silver
     resp.add_val(3000); // 285 quest 3 silver
 
-    resp.add_val(Mount::Dragon as u32); // Mount?
+    let mut mount_end = player.mountend;
+    let mut mount = player.mount;
+
+    if let Some(me) = mount_end {
+        if me < Local::now().naive_local() || mount == 0 {
+            mount = 0;
+            mount_end = None;
+        }
+    }
+
+    resp.add_val(mount); // Mount?
 
     // Weapon shop
     resp.add_val(1708336503); // 287
@@ -932,9 +1041,8 @@ async fn player_poll(
     resp.add_val(6); // 448  Min damage
     resp.add_val(12); // 449 Max damage
     resp.add_val(112); // 450
-    resp.add_val(to_seconds(
-        Local::now() + Duration::from_secs(60 * 60 * 24 * 7),
-    )); // 451 Mount end
+                       // 451 Mount end
+    resp.add_val(mount_end.map(to_seconds).unwrap_or_default());
     resp.add_val(0); // 452
     resp.add_val(0); // 453
     resp.add_val(0); // 454
@@ -1285,7 +1393,7 @@ async fn player_poll(
     }
 
     resp.add_key("owndescription.s");
-    resp.add_str("");
+    resp.add_str(&to_sf_string(&player.description));
 
     resp.add_key("ownplayername.r");
     resp.add_str(&player.name);
@@ -1312,7 +1420,7 @@ async fn player_poll(
 
     resp.add_key("timestamp");
 
-    resp.add_val(to_seconds(Local::now()));
+    resp.add_val(in_seconds(0));
 
     resp.add_key("fortressprice.fortressPrice(13)");
     resp.add_str(
@@ -1360,9 +1468,10 @@ async fn player_poll(
     resp.add_key("cidstring");
     resp.add_str("no_cid");
 
-    resp.add_key("tracking.s");
-    resp.add_str(tracking);
-    // resp.add_str("accountlogin");
+    if !tracking.is_empty() {
+        resp.add_key("tracking.s");
+        resp.add_str(tracking);
+    }
 
     resp.add_key("calenderinfo");
     resp.add_str(calendar_info);
@@ -1465,11 +1574,10 @@ async fn player_poll(
 }
 
 fn in_seconds(secs: u64) -> i64 {
-    to_seconds(Local::now() + Duration::from_secs(secs))
+    to_seconds(Local::now().naive_local() + Duration::from_secs(secs))
 }
 
-fn to_seconds(time: DateTime<Local>) -> i64 {
-    let a = time.naive_local();
+fn to_seconds(a: NaiveDateTime) -> i64 {
     let b = NaiveDateTime::from_timestamp_opt(0, 0).unwrap();
     (a - b).num_seconds()
 }
