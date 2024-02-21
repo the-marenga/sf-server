@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use actix_cors::Cors;
-use actix_web::{get, rt::spawn, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine;
 use num_traits::FromPrimitive;
 use sf_api::{
-    command::{AttributeType, Flag},
+    command::AttributeType,
     gamestate::{
         character::{Class, Gender, Mount, Race},
         tavern::QuestLocation,
@@ -23,6 +23,7 @@ use crate::response::*;
 pub mod response;
 
 const BAD_REQUEST: Response = Response::Error(Error::BadRequest);
+const INTERNAL_ERR: Response = Response::Error(Error::Internal);
 
 const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
 const DEFAULT_CRYPTO_ID: &str = "0-00000000000000";
@@ -68,11 +69,12 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                  WHERE cryptoid = $1",
                 crypto_id
             )
-            .fetch_one(&db)
+            .fetch_optional(&db)
             .await
             {
-                Ok(val) => (val.id, val.cryptokey),
-                Err(_) => return BAD_REQUEST,
+                Ok(Some(val)) => (val.id, val.cryptokey),
+                Ok(None) => return Error::InvalidAuth.resp(),
+                Err(_) => return INTERNAL_ERR,
             }
         }
     };
@@ -85,38 +87,47 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     let request = request.trim_matches('|');
 
     let (command_name, command_args) = request.split_once(':').unwrap();
-    println!("Received: {command_name}: {}", command_args);
+    if command_name != "Poll" {
+        println!("Received: {command_name}: {}", command_args);
+    }
     let command_args: Vec<_> = command_args.split('/').collect();
 
     let command_args = CommandArguments(command_args);
 
     let mut rng = fastrand::Rng::new();
 
-    if player_id == 0 && !["AccountCreate", "AccountLogin", "AccountCheck"].contains(&command_name)
+    if player_id == 0
+        && ![
+            "AccountCreate",
+            "AccountLogin",
+            "AccountCheck",
+            "AccountDelete",
+        ]
+        .contains(&command_name)
     {
-        return BAD_REQUEST;
+        return Error::InvalidAuth.resp();
     }
 
     match command_name {
         "AccountCreate" => {
             let Some(name) = command_args.get_str(0) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("name").resp();
             };
             let Some(password) = command_args.get_str(1) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("password").resp();
             };
             let Some(mail) = command_args.get_str(2) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("mail").resp();
             };
             let Some(_gender) = command_args
                 .get_int(3)
                 .map(|a| a.saturating_sub(1))
                 .and_then(Gender::from_i64)
             else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("gender").resp();
             };
             let Some(_race) = command_args.get_int(4).and_then(Race::from_i64) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("race").resp();
             };
 
             let Some(class) = command_args
@@ -124,11 +135,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 .map(|a| a.saturating_sub(1))
                 .and_then(Class::from_i64)
             else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("class").resp();
             };
 
             if is_invalid_name(name) {
-                return Error::InvalidName.into_resp();
+                return Error::InvalidName.resp();
             }
 
             // TODO: Do some more input validation
@@ -149,7 +160,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 .collect();
 
             let Ok(mut tx) = db.begin().await else {
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let Ok(login_id) = sqlx::query_scalar!(
@@ -166,10 +177,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             .await
             else {
                 _ = tx.rollback().await;
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let mut quests = [0; 3];
+            #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
                 let Ok(quest_id) = sqlx::query_scalar!(
                     "INSERT INTO QUEST \
@@ -183,7 +195,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 .await
                 else {
                     _ = tx.rollback().await;
-                    return BAD_REQUEST;
+                    return INTERNAL_ERR;
                 };
                 quests[i] = quest_id;
             }
@@ -200,7 +212,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             .await
             else {
                 _ = tx.rollback().await;
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let Ok(bag_id) =
@@ -209,7 +221,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                     .await
             else {
                 _ = tx.rollback().await;
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let Ok(attr_id) = sqlx::query_scalar!(
@@ -222,11 +234,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 2,
                 4
             )
-            .fetch_one(&db)
+            .fetch_one(&mut *tx)
             .await
             else {
                 _ = tx.rollback().await;
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let Ok(attr_upgrades) = sqlx::query_scalar!(
@@ -239,62 +251,94 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 0,
                 0
             )
-            .fetch_one(&db)
+            .fetch_one(&mut *tx)
             .await
             else {
                 _ = tx.rollback().await;
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
-            let Ok(pid) = sqlx::query_scalar!(
+            let Ok(portrait_id) = sqlx::query_scalar!(
+                "INSERT INTO PORTRAIT \
+                (Mouth, HairColor, Hair, Brows, Eyes, Beards, Nose, Ears) \
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) returning ID",
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
+
+            let pid = match sqlx::query_scalar!(
                 "INSERT INTO Character
-                (Name, Class, Bag, Attributes, AttributesBought, LoginData, Tavern)
-                VALUES ($1, $2, $3, $4, $5, $6, $7) returning ID",
+                (Name, Class, Attributes, AttributesBought, LoginData, Tavern, Bag, Portrait)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) returning ID",
                 name,
                 class as i32,
-                bag_id,
                 attr_id,
                 attr_upgrades,
                 login_id,
                 tavern_id,
+                bag_id,
+                portrait_id,
             )
-            .fetch_one(&db)
+            .fetch_one(&mut *tx)
             .await
-            else {
-                _ = tx.rollback().await;
-                return BAD_REQUEST;
+            {
+                Ok(pid) => pid,
+                Err(e) => {
+                    println!("{e}");
+                    println!("{portrait_id}");
+                    _ = tx.rollback().await;
+                    return INTERNAL_ERR;
+                }
             };
 
-            player_poll(pid, "signup", &db).await
+            if tx.commit().await.is_err() {
+                return INTERNAL_ERR;
+            };
+
+            ResponseBuilder::default()
+                .add_key("tracking.s")
+                .add_str("signup")
+                .build()
         }
         "AccountLogin" => {
             let Some(name) = command_args.get_str(0) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("name").resp();
             };
             let Some(full_hash) = command_args.get_str(1) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("password hash").resp();
             };
             let Some(login_count) = command_args.get_int(2) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("login count").resp();
             };
 
             let Ok(info) = sqlx::query!(
-                "
-                    SELECT character.id, pwhash, character.logindata \
-                    FROM character \
-                    LEFT JOIN logindata on logindata.id = character.logindata \
-                    WHERE lower(name) = lower($1)",
+                "SELECT character.id, pwhash, character.logindata \
+                 FROM character \
+                 LEFT JOIN logindata on logindata.id = character.logindata \
+                 WHERE lower(name) = lower($1)",
                 name
             )
             .fetch_one(&db)
             .await
             else {
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let correct_full_hash = sha1_hash(&format!("{}{login_count}", info.pwhash));
             if correct_full_hash != full_hash {
-                return Error::WrongPassword.into_resp();
+                return Error::WrongPassword.resp();
             }
 
             let session_id: String = (0..DEFAULT_SESSION_ID.len())
@@ -319,7 +363,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             .await
             .is_err()
             {
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             player_poll(info.id, "accountlogin", &db).await
@@ -345,80 +389,117 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 1.. => rank,
                 _ => {
                     let Some(name) = name else {
-                        return BAD_REQUEST;
+                        return Error::MissingArgument("name or rank").resp();
                     };
 
-                    let Ok(honor) =
-                        sqlx::query_scalar!("SELECT honor from character where name = $1", name)
+                    let Ok(info) =
+                        sqlx::query!("SELECT honor, id from character where name = $1", name)
                             .fetch_one(&db)
                             .await
                     else {
-                        return BAD_REQUEST;
+                        return INTERNAL_ERR;
                     };
 
                     let Ok(Some(rank)) = sqlx::query_scalar!(
-                        "SELECT count(*) from character where honor >= $1",
-                        honor
+                        "SELECT count(*) from character where honor > $1 OR honor = $1 AND id <= $2",
+                        info.honor,
+                        info.id
                     )
                     .fetch_one(&db)
                     .await
                     else {
-                        return BAD_REQUEST;
+                        return INTERNAL_ERR;
                     };
                     rank
                 }
             };
 
-            let mut min = rank - pre;
-
-            while min < 1 {
-                min += 1;
-            }
+            let offset = (rank - pre).max(1) - 1;
+            let limit = (pre + post).min(30);
 
             let Ok(results) = sqlx::query!(
-                "SELECT id \
+                "SELECT id, level, name, class, honor \
                  FROM CHARACTER \
                  ORDER BY honor desc, id \
                  OFFSET $1
                  LIMIT $2",
-                min,
-                pre + post,
+                offset,
+                limit,
             )
             .fetch_all(&db)
             .await
             else {
-                return BAD_REQUEST;
+                return INTERNAL_ERR;
             };
 
             let mut players = String::new();
-            // for result in results {
-            //     let player = format!(
-            //         "{},{},{},{},{},{},{};",
-            //         result.rank.unwrap_or_default(),
-            //         &result.name,
-            //         "",
-            //         result.level,
-            //         result.honor,
-            //         result.class + 1,
-            //         "de"
-            //     );
-            //     players.push_str(&player);
-            // }
+            for (pos, result) in results.into_iter().enumerate() {
+                let player = format!(
+                    "{},{},{},{},{},{},{};",
+                    offset + pos as i64 + 1,
+                    &result.name,
+                    "",
+                    result.level,
+                    result.honor,
+                    result.class + 1,
+                    ""
+                );
+                players.push_str(&player);
+            }
 
-            let mut rb = ResponseBuilder::default();
-            rb.add_key("Ranklistplayer.r");
-            rb.add_str(&players);
-            rb.build()
+            ResponseBuilder::default()
+                .add_key("Ranklistplayer.r")
+                .add_str(&players)
+                .build()
+        }
+        "AccountDelete" => {
+            let Some(name) = command_args.get_str(0) else {
+                return Error::MissingArgument("name").resp();
+            };
+            let Some(full_hash) = command_args.get_str(1) else {
+                return Error::MissingArgument("password hash").resp();
+            };
+            let Some(login_count) = command_args.get_int(2) else {
+                return Error::MissingArgument("login count").resp();
+            };
+            let Some(_mail) = command_args.get_str(3) else {
+                return Error::MissingArgument("mail").resp();
+            };
+            let Ok(info) = sqlx::query!(
+                "SELECT character.id, pwhash \
+                 FROM character \
+                 LEFT JOIN logindata on logindata.id = character.logindata \
+                 WHERE lower(name) = lower($1)",
+                name,
+            )
+            .fetch_one(&db)
+            .await
+            else {
+                return INTERNAL_ERR;
+            };
+
+            let correct_full_hash = sha1_hash(&format!("{}{login_count}", info.pwhash));
+            if correct_full_hash != full_hash {
+                return Error::WrongPassword.resp();
+            }
+
+            match sqlx::query!("DELETE FROM character WHERE id = $1", info.id)
+                .execute(&db)
+                .await
+            {
+                Ok(_) => Response::Success,
+                Err(_) => INTERNAL_ERR,
+            }
         }
         "PlayerTutorialStatus" => Response::Success,
         "Poll" => player_poll(player_id, "poll", &db).await,
         "AccountCheck" => {
             let Some(name) = command_args.get_str(0) else {
-                return BAD_REQUEST;
+                return Error::MissingArgument("name").resp();                ;
             };
 
             if is_invalid_name(name) {
-                return Error::InvalidName.into_resp();
+                return Error::InvalidName.resp();
             }
 
             let count = sqlx::query_scalar!("SELECT COUNT(*) FROM CHARACTER WHERE name = $1", name)
@@ -436,11 +517,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                     .add_val(0)
                     .build();
             }
-            Error::CharacterExists.into_resp()
+            Error::CharacterExists.resp()
         }
         _ => {
             println!("Unknown command: {command_name} - {:?}", command_args);
-            Error::BadRequest.into_resp()
+            Error::BadRequest.resp()
         }
     }
 }
@@ -460,7 +541,6 @@ pub(crate) fn sha1_hash(val: &str) -> String {
 }
 
 async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response {
-    let mut rng = fastrand::Rng::new();
     let mut builder = ResponseBuilder::default();
     let resp = builder
         .add_key("serverversion")
@@ -481,7 +561,7 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     .fetch_one(db)
     .await
     else {
-        return Error::BadRequest.into_resp();
+        return Error::BadRequest.resp();
     };
 
     let calendar_info =
@@ -569,8 +649,9 @@ async fn player_poll(pid: i32, tracking: &str, db: &Pool<Postgres>) -> Response 
     resp.add_val(100); // Honor
 
     let Ok(Some(rank)) = sqlx::query_scalar!(
-        "SELECT count(*) from character where honor >= $1",
-        player.honor
+        "SELECT count(*) from character where honor > $1 OR honor = $1 AND ID <= $2",
+        player.honor,
+        pid
     )
     .fetch_one(db)
     .await

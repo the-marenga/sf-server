@@ -1,6 +1,5 @@
 use actix_web::{HttpResponse, Responder};
 
-
 #[derive(Debug, serde::Deserialize)]
 #[allow(unused)]
 pub struct Request {
@@ -19,11 +18,15 @@ pub enum Error {
     InvalidName,
     CharacterExists,
     BadRequest,
-    WrongPassword
+    UnknownRequest,
+    WrongPassword,
+    InvalidAuth,
+    MissingArgument(&'static str),
+    Internal,
 }
 
 impl Error {
-    pub fn into_resp(self) -> Response {
+    pub fn resp(self) -> Response {
         Response::Error(self)
     }
 }
@@ -78,23 +81,25 @@ impl ResponseBuilder {
 }
 
 impl Error {
-    pub fn error_str(&self) -> &'static str {
+    pub fn error_str(&self) -> String {
         match self {
             Error::InvalidName => "name is not available",
             Error::CharacterExists => "character exists",
             Error::BadRequest => "bad request",
-            Error::WrongPassword => "wrong pass"
+            Error::WrongPassword => "wrong pass",
+            Error::InvalidAuth => "command requires valid session",
+            Error::UnknownRequest => "unknown request",
+            Error::MissingArgument(name) => return format!("command missing argument: {name}"),
+            Error::Internal => "internal server error",
         }
+        .to_string()
     }
 }
 
 impl Responder for Response {
     type Body = actix_web::body::BoxBody;
 
-    fn respond_to(
-        self,
-        _req: &actix_web::HttpRequest,
-    ) -> HttpResponse<Self::Body> {
+    fn respond_to(self, _req: &actix_web::HttpRequest) -> HttpResponse<Self::Body> {
         let body = match self {
             Response::Success => "Success:".to_string(),
             Response::Data(d) => d,
