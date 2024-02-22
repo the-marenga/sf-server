@@ -1,8 +1,5 @@
-use std::fmt::Display;
-
 use aho_corasick::AhoCorasick;
 use once_cell::sync::Lazy;
-use sf_api::error::SFError;
 
 /// Converts a  s&f string from the server to their original unescaped
 /// representation

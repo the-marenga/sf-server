@@ -6,10 +6,7 @@ use base64::Engine;
 use num_traits::FromPrimitive;
 use sf_api::{
     command::AttributeType,
-    gamestate::{
-        character::{Class, Gender, Race},
-        tavern::QuestLocation,
-    },
+    gamestate::character::{Class, Gender, Race},
 };
 use sqlx::{
     postgres::PgPoolOptions,
@@ -76,8 +73,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         true => (-1, DEFAULT_CRYPTO_KEY.to_string()),
         false => {
             match sqlx::query!(
-                "SELECT cryptokey, character.id 
-                 FROM character 
+                "SELECT cryptokey, character.id
+                 FROM character
                  LEFT JOIN Logindata on logindata.id = character.logindata
                  WHERE cryptoid = $1",
                 crypto_id
@@ -182,11 +179,10 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            if tx.commit().await.is_err() {
-                return INTERNAL_ERR;
-            };
-
-            Response::Success
+            match tx.commit().await {
+                Err(_) => INTERNAL_ERR,
+                Ok(_) => Response::Success,
+            }
         }
         "AccountCreate" => {
             let Some(name) = command_args.get_str(0) else {
@@ -310,7 +306,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
             let Ok(attr_id) = sqlx::query_scalar!(
                 "INSERT INTO Attributes
-                ( Strength, Dexterity, Intelligence, Stamina, Luck ) 
+                ( Strength, Dexterity, Intelligence, Stamina, Luck )
                 VALUES ($1, $2, $3, $4, $5) returning ID",
                 3,
                 6,
@@ -327,7 +323,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
             let Ok(attr_upgrades) = sqlx::query_scalar!(
                 "INSERT INTO Attributes
-                ( Strength, Dexterity, Intelligence, Stamina, Luck ) 
+                ( Strength, Dexterity, Intelligence, Stamina, Luck )
                 VALUES ($1, $2, $3, $4, $5) returning ID",
                 0,
                 0,
@@ -363,11 +359,21 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
+            let Ok(activity_id) = sqlx::query_scalar!(
+                "INSERT INTO Activity (typ) VALUES (0) RETURNING ID",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
+
             if sqlx::query_scalar!(
                 "INSERT INTO Character
                 (Name, Class, Attributes, AttributesBought, LoginData, Tavern, \
-                 Bag, Portrait, Gender, Race)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                 Bag, Portrait, Gender, Race, Activity)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 name,
                 class as i32 + 1,
                 attr_id,
@@ -377,7 +383,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 bag_id,
                 portrait_id,
                 gender as i32 + 1,
-                race as i32
+                race as i32,
+                activity_id
             )
             .execute(&mut *tx)
             .await
@@ -436,7 +443,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             }
 
             if sqlx::query!(
-                "UPDATE logindata 
+                "UPDATE logindata
                 set sessionid = $2, cryptoid = $3
                 where id = $1",
                 info.logindata,
@@ -591,6 +598,84 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 Err(_) => INTERNAL_ERR,
             }
         }
+        "PlayerAdventureStart" => {
+            let Some(quest) = command_args.get_int(0) else {
+                return Error::MissingArgument("quest").resp();
+            };
+            let Some(skip_inv) = command_args.get_int(0) else {
+                return Error::MissingArgument("skip_inv").resp();
+            };
+
+            if !(1..=3).contains(&quest) || !(0..=1).contains(&skip_inv) {
+                return Error::BadRequest.resp();
+            }
+
+            let Ok(mut tx) = db.begin().await else {
+                return INTERNAL_ERR;
+            };
+
+            let Ok(info) = sqlx::query!(
+                "SELECT mount, mountend, activity.id as activityid, typ, \
+                 subtyp, BusyUntil, q1.length as ql1, q2.Length as ql2, \
+                 q3.length as ql3, tavern.Quest1 as q1id, tavern.Quest2 as \
+                 q2id, tavern.Quest3 as q3id FROM character LEFT JOIN \
+                 activity ON activity.id = character.activity LEFT JOIN \
+                 TAVERN on character.tavern = tavern.id LEFT JOIN Quest as q1 \
+                 on q1.id = tavern.Quest1 LEFT JOIN Quest as q2 on q2.id = \
+                 tavern.Quest2 LEFT JOIN Quest as q3 on q3.id = tavern.Quest3 \
+                 WHERE character.id = $1",
+                player_id
+            )
+            .fetch_one(&mut *tx)
+            .await
+            else {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
+
+            if info.typ != 0 {
+                return Error::StillBusy.resp();
+            }
+
+            let mut mount_end = info.mountend;
+            let mut mount = info.mount;
+            let mount_effect = effective_mount(&mut mount_end, &mut mount);
+
+            let quest_length = match quest {
+                1 => info.ql1,
+                2 => info.ql2,
+                _ => info.ql3,
+            } as f32
+                * mount_effect;
+
+            let quest_id = match quest {
+                1 => info.q1id,
+                2 => info.q2id,
+                _ => info.q3id,
+            };
+
+            if sqlx::query!(
+                "UPDATE activity SET TYP = 1, SUBTYP = $2, BUSYUNTIL = $3, \
+                 STARTED = CURRENT_TIMESTAMP WHERE id = $1",
+                info.activityid,
+                quest_id,
+                Local::now().naive_local()
+                    + Duration::from_secs(quest_length as u64),
+            )
+            .execute(&mut *tx)
+            .await
+            .is_err()
+            {
+                _ = tx.rollback().await;
+                return INTERNAL_ERR;
+            };
+
+            if tx.commit().await.is_err() {
+                return INTERNAL_ERR;
+            };
+
+            Response::Success
+        }
         "PlayerMountBuy" => {
             let Some(mount) = command_args.get_int(0) else {
                 return Error::MissingArgument("mount").resp();
@@ -665,10 +750,10 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            if tx.commit().await.is_err() {
-                return INTERNAL_ERR;
-            };
-            player_poll(player_id, "", &db).await
+            match tx.commit().await {
+                Err(_) => INTERNAL_ERR,
+                Ok(_) => player_poll(player_id, "", &db).await,
+            }
         }
         "PlayerTutorialStatus" => {
             let Some(status) = command_args.get_int(0) else {
@@ -679,18 +764,16 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return Error::BadRequest.resp();
             }
 
-            if sqlx::query!(
+            match sqlx::query!(
                 "UPDATE CHARACTER SET tutorialstatus = $1 WHERE ID = $2",
                 status as i32, player_id,
             )
             .execute(&db)
             .await
-            .is_err()
             {
-                return INTERNAL_ERR;
-            };
-
-            Response::Success
+                Ok(_) => Response::Success,
+                Err(_) => INTERNAL_ERR,
+            }
         }
         "Poll" => player_poll(player_id, "poll", &db).await,
         "AccountCheck" => {
@@ -798,16 +881,26 @@ async fn player_poll(
         .skip_key();
 
     let Ok(player) = sqlx::query!(
-        "SELECT character.*, logindata.sessionid, logindata.cryptoid, 
-            logindata.cryptokey, logindata.logincount, 
+        "SELECT character.*, logindata.sessionid, logindata.cryptoid,
+            logindata.cryptokey, logindata.logincount,
             portrait.mouth, portrait.Hair, portrait.Brows, portrait.Eyes, \
          portrait.Beards, portrait.Nose, portrait.Ears, portrait.Extra, \
          portrait.Horns, tavern.tfa, tavern.BeerDrunk, tavern.QuickSand, \
-         tavern.DiceGamesRemaining, tavern.DiceGameNextFree
+         tavern.DiceGamesRemaining, tavern.DiceGameNextFree,
+         q1.XP as q1xp, q3.XP as q3xp, q2.XP as q2xp,
+         q1.Silver as q1silver, q3.SILVER as q3silver, q2.SILVER as q2silver,
+         q1.Flavour1 as q1f1, q1.Flavour2 as q1f2, q1.Monster as q1monster, \
+         q1.Location as q1location, q1.length as q1length, q1.item as q1item,
+         q2.Flavour1 as q2f1, q2.Flavour2 as q2f2, q2.Monster as q2monster, \
+         q2.Location as q2location, q2.length as q2length, q2.item as q2item,
+         q3.Flavour1 as q3f1, q3.Flavour2 as q3f2, q3.Monster as q3monster, \
+         q3.Location as q3location, q3.length as q3length, q3.item as q3item
         FROM CHARACTER LEFT JOIN logindata on logindata.id = \
          character.logindata LEFT JOIN portrait on portrait.id = \
          character.portrait LEFT JOIN tavern on tavern.id = character.tavern \
-         WHERE character.id = $1",
+         LEFT JOIN quest as q1 on tavern.quest1 = q1.id LEFT JOIN quest as q2 \
+         on tavern.quest2 = q2.id LEFT JOIN quest as q3 on tavern.quest2 = \
+         q3.id WHERE character.id = $1",
         pid
     )
     .fetch_one(db)
@@ -979,25 +1072,29 @@ async fn player_poll(
     // - the quest name
     // - the quest giver
 
-    resp.add_val(4); // 229 Quest1 Flavour1
-    resp.add_val(4); // 230 Quest2 Flavour1
-    resp.add_val(4); // 231 Quest3 Flavour1
+    resp.add_val(player.q1f1); // 229 Quest1 Flavour1
+    resp.add_val(player.q2f1); // 230 Quest2 Flavour1
+    resp.add_val(player.q2f1); // 231 Quest3 Flavour1
 
-    resp.add_val(4); // 232 Quest1 Flavour2
-    resp.add_val(4); // 233 Quest2 Flavour2
-    resp.add_val(4); // 234 Quest3 Flavour2
+    resp.add_val(player.q1f2); // 233 Quest2 Flavour2
+    resp.add_val(player.q2f2); // 232 Quest1 Flavour2
+    resp.add_val(player.q3f2); // 234 Quest3 Flavoplayer.q1monster
+    resp.add_val(player.q1monster); // 235 quest 1 monster
+    resp.add_val(player.q2monster); // 236 quest 2 monster
+    resp.add_val(player.q3monster); // 237 quest 3 monster
 
-    resp.add_val(-139); // 235 quest 1 monster
-    resp.add_val(-139); // 236 quest 2 monster
-    resp.add_val(-139); // 237 quest 3 monster
+    resp.add_val(player.q1location); // 238 quest 1 location
+    resp.add_val(player.q2location); // 239 quest 2 location
+    resp.add_val(player.q3location); // 240 quest 3 location
 
-    resp.add_val(QuestLocation::SkullIsland as i32); // 238 quest 1 location
-    resp.add_val(QuestLocation::SkullIsland as i32); // 239 quest 2 location
-    resp.add_val(QuestLocation::SkullIsland as i32); // 240 quest 3 location
+    let mut mount_end = player.mountend;
+    let mut mount = player.mount;
 
-    resp.add_val(5); // 241 quest 1 length
-    resp.add_val(5); // 242 quest 2 length
-    resp.add_val(5); // 243 quest 3 length
+    let mount_effect = effective_mount(&mut mount_end, &mut mount);
+
+    resp.add_val((player.q1length as f32 * mount_effect) as i32); // 241 quest 1 length
+    resp.add_val((player.q2length as f32 * mount_effect) as i32); // 242 quest 2 length
+    resp.add_val((player.q3length as f32 * mount_effect) as i32); // 243 quest 3 length
 
     // Quest 1..=3 items
     for _ in 0..3 {
@@ -1006,23 +1103,13 @@ async fn player_poll(
         }
     }
 
-    resp.add_val(1000); // 280 quest 1 xp
-    resp.add_val(2000); // 281 quest 2 xp
-    resp.add_val(3000); // 282 quest 3 xp
+    resp.add_val(player.q1xp); // 280 quest 1 xp
+    resp.add_val(player.q2xp); // 281 quest 2 xp
+    resp.add_val(player.q3xp); // 282 quest 3 xp
 
-    resp.add_val(1000); // 283 quest 1 silver
-    resp.add_val(2000); // 284 quest 2 silver
-    resp.add_val(3000); // 285 quest 3 silver
-
-    let mut mount_end = player.mountend;
-    let mut mount = player.mount;
-
-    if let Some(me) = mount_end {
-        if me < Local::now().naive_local() || mount == 0 {
-            mount = 0;
-            mount_end = None;
-        }
-    }
+    resp.add_val(player.q1silver); // 283 quest 1 silver
+    resp.add_val(player.q2silver); // 284 quest 2 silver
+    resp.add_val(player.q3silver); // 285 quest 3 silver
 
     resp.add_val(mount); // Mount?
 
@@ -1434,7 +1521,7 @@ async fn player_poll(
     resp.add_val(0);
 
     resp.add_key("skipvideo");
-    resp.add_val(1);
+    resp.add_val(0);
 
     resp.add_key("fortresspricereroll");
     resp.add_val(18);
@@ -1592,6 +1679,26 @@ async fn player_poll(
     resp.add_val(&player.cryptokey);
 
     resp.build()
+}
+
+fn effective_mount(
+    mount_end: &mut Option<NaiveDateTime>,
+    mount: &mut i32,
+) -> f32 {
+    if let Some(me) = *mount_end {
+        if me < Local::now().naive_local() || *mount == 0 {
+            *mount = 0;
+            *mount_end = None;
+        }
+    }
+
+    match *mount {
+        0 => 1.0,
+        1 => 0.9,
+        2 => 0.8,
+        3 => 0.7,
+        _ => 0.5,
+    }
 }
 
 fn in_seconds(secs: u64) -> i64 {

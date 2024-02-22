@@ -24,6 +24,7 @@ pub enum Error {
     MissingArgument(&'static str),
     Internal,
     NotEnoughMoney,
+    StillBusy,
 }
 
 impl Error {
@@ -95,6 +96,7 @@ impl Error {
             }
             Error::Internal => "internal server error",
             Error::NotEnoughMoney => "need more gold",
+            Error::StillBusy => "still busy",
         }
         .to_string()
     }
