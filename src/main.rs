@@ -3,10 +3,14 @@ use std::time::Duration;
 use actix_cors::Cors;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine;
+use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use sf_api::{
     command::AttributeType,
-    gamestate::character::{Class, Gender, Race},
+    gamestate::{
+        character::{Class, Gender, Race},
+        items::{Enchantment, Item},
+    },
 };
 use sqlx::{
     postgres::PgPoolOptions,
@@ -52,7 +56,6 @@ impl<'a> CommandArguments<'a> {
         self.0.get(pos).copied()
     }
 }
-
 #[get("/req.php")]
 async fn request(info: web::Query<Request>) -> impl Responder {
     let request = &info.req;
@@ -457,7 +460,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            player_poll(info.id, "accountlogin", &db).await
+            player_poll(info.id, "accountlogin", &db, Default::default()).await
         }
         "AccountSetLanguage" => {
             // NONE
@@ -480,7 +483,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             {
                 return INTERNAL_ERR;
             };
-            player_poll(player_id, "", &db).await
+            player_poll(player_id, "", &db, Default::default()).await
         }
         "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
             .add_key("helpshiftauthtoken")
@@ -602,7 +605,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             let Some(quest) = command_args.get_int(0) else {
                 return Error::MissingArgument("quest").resp();
             };
-            let Some(skip_inv) = command_args.get_int(0) else {
+            let Some(skip_inv) = command_args.get_int(1) else {
                 return Error::MissingArgument("skip_inv").resp();
             };
 
@@ -648,17 +651,11 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             } as f32
                 * mount_effect;
 
-            let quest_id = match quest {
-                1 => info.q1id,
-                2 => info.q2id,
-                _ => info.q3id,
-            };
-
             if sqlx::query!(
                 "UPDATE activity SET TYP = 1, SUBTYP = $2, BUSYUNTIL = $3, \
                  STARTED = CURRENT_TIMESTAMP WHERE id = $1",
                 info.activityid,
-                quest_id,
+                quest as i32,
                 Local::now().naive_local()
                     + Duration::from_secs(quest_length as u64),
             )
@@ -674,7 +671,167 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            Response::Success
+            player_poll(player_id, "", &db, Default::default()).await
+        }
+        "PlayerAdventureFinished" => {
+            let Ok(player) = sqlx::query!(
+                "SELECT mount, mountend, name, level, portrait.*, \
+                 activity.typ, activity.subtyp, activity.busyuntil, \
+                 activity.started,  character.gender, character.race, \
+                 character.class, q1.XP as q1xp, q3.XP as q3xp, q2.XP as \
+                 q2xp, q1.Silver as q1silver, q3.SILVER as q3silver, \
+                 q2.SILVER as q2silver, q1.Mushrooms as q1mush,  q1.Monster \
+                 as q1monster, q1.Location as q1location, q1.length as \
+                 q1length, q1.item as q1item, q2.Mushrooms as q2mush, \
+                 q2.Monster as q2monster, q2.Location as q2location, \
+                 q2.length as q2length, q2.item as q2item, q3.Mushrooms as \
+                 q3mush, q3.Monster as q3monster, q3.Location as q3location, \
+                 q3.length as q3length, q3.item as q3item FROM CHARACTER LEFT \
+                 JOIN PORTRAIT ON character.portrait = portrait.id LEFT JOIN \
+                 tavern on tavern.id = character.tavern LEFT JOIN quest as q1 \
+                 on tavern.quest1 = q1.id LEFT JOIN quest as q2 on \
+                 tavern.quest2 = q2.id LEFT JOIN quest as q3 on tavern.quest2 \
+                 = q3.id LEFT JOIN ACTIVITY ON activity.id = \
+                 character.activity WHERE character.id = $1",
+                player_id
+            )
+            .fetch_one(&db)
+            .await
+            else {
+                return INTERNAL_ERR;
+            };
+
+            if player.typ != 2 {
+                // We are not actually questing
+                return Error::StillBusy.resp();
+            }
+
+            if let Some(busy) = player.busyuntil {
+                if busy > Local::now().naive_local() {
+                    // Quest is still going
+                    return Error::StillBusy.resp();
+                }
+            }
+
+            let (xp, silver, mush, monster, location) = match player.subtyp {
+                1 => (
+                    player.q1xp, player.q1silver, player.q1mush,
+                    player.q1monster, player.q1location,
+                ),
+                2 => (
+                    player.q2xp, player.q2silver, player.q2mush,
+                    player.q2monster, player.q2location,
+                ),
+                _ => (
+                    player.q3xp, player.q3silver, player.q3mush,
+                    player.q3monster, player.q3location,
+                ),
+            };
+
+            let honor_won = 10;
+
+            let mut resp = ResponseBuilder::default();
+
+            resp.add_key("fightresult.battlereward");
+            resp.add_val(true as u8);
+            resp.add_val(0);
+            resp.add_val(silver);
+            resp.add_val(xp);
+
+            resp.add_val(mush);
+            resp.add_val(honor_won);
+            for _ in 0..15 {
+                resp.add_val(0);
+            }
+
+            resp.add_key("fightheader.fighters");
+            let monster_id = -monster;
+            let monster_level = player.level;
+
+            let player_attributes = [1, 1, 1, 1, 1];
+            let monster_attributes = [1, 1, 1, 1, 1];
+            let monster_hp = 10_000;
+            let player_hp = 10_000;
+
+            resp.add_val(1);
+            resp.add_val(0);
+            resp.add_val(0);
+
+            // Location
+            resp.add_val(location);
+
+            resp.add_val(1);
+            resp.add_val(player_id);
+            resp.add_val(player.name);
+            resp.add_val(player.level);
+            for _ in 0..2 {
+                resp.add_val(player_hp);
+            }
+            for val in player_attributes {
+                resp.add_val(val);
+            }
+            // Portrait
+            resp.add_val(player.mouth);
+            resp.add_val(player.hair);
+            resp.add_val(player.brows);
+            resp.add_val(player.eyes);
+            resp.add_val(player.beards);
+            resp.add_val(player.nose);
+            resp.add_val(player.ears);
+            resp.add_val(player.extra);
+            resp.add_val(player.horns);
+
+            resp.add_val(0); // ??
+
+            resp.add_val(player.race);
+            resp.add_val(player.gender); // Gender?
+            resp.add_val(player.class);
+
+            // Main weapon
+            for _ in 0..12 {
+                resp.add_val(0);
+            }
+
+            // Sub weapon
+            for _ in 0..12 {
+                resp.add_val(0);
+            }
+
+            // Monster
+            for _ in 0..2 {
+                resp.add_val(monster_id);
+            }
+            resp.add_val(monster_level);
+            resp.add_val(monster_hp);
+            resp.add_val(monster_hp);
+            for attr in monster_attributes {
+                resp.add_val(attr);
+            }
+            resp.add_val(monster_id);
+            for _ in 0..11 {
+                resp.add_val(0);
+            }
+            resp.add_val(3); // Class?
+
+            // Probably also items
+            // This means just charging the portrait into the player
+            resp.add_val(-1);
+            for _ in 0..23 {
+                resp.add_val(0);
+            }
+
+            resp.add_key("fight.r");
+            resp.add_str(&format!("{player_id},0,-1000"));
+
+            // TODO: actually simulate fight
+
+            resp.add_key("winnerid");
+            resp.add_val(player_id);
+
+            resp.add_key("fightversion");
+            resp.add_val(1);
+
+            player_poll(player_id, "", &db, resp).await
         }
         "PlayerMountBuy" => {
             let Some(mount) = command_args.get_int(0) else {
@@ -752,7 +909,9 @@ async fn request(info: web::Query<Request>) -> impl Responder {
 
             match tx.commit().await {
                 Err(_) => INTERNAL_ERR,
-                Ok(_) => player_poll(player_id, "", &db).await,
+                Ok(_) => {
+                    player_poll(player_id, "", &db, Default::default()).await
+                }
             }
         }
         "PlayerTutorialStatus" => {
@@ -775,7 +934,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 Err(_) => INTERNAL_ERR,
             }
         }
-        "Poll" => player_poll(player_id, "poll", &db).await,
+        "Poll" => player_poll(player_id, "poll", &db, Default::default()).await,
         "AccountCheck" => {
             let Some(name) = command_args.get_str(0) else {
                 return Error::MissingArgument("name").resp();
@@ -838,6 +997,213 @@ pub struct Portrait {
     horns: i32,
 }
 
+#[derive(Debug, FromPrimitive, Clone, Copy)]
+pub enum RawItemTyp {
+    Weapon = 1,
+    Shield,
+    BreastPlate,
+    FootWear,
+    Gloves,
+    Hat,
+    Belt,
+    Amulet,
+    Ring,
+    Talisman,
+    UniqueItem,
+    Useable,
+    Scrapbook,
+    Gem = 15,
+    PetItem,
+    QuickSandGlassOrGral,
+    HeartOfDarkness,
+    WheelOfFortune,
+    Mannequin,
+}
+
+#[derive(Debug, FromPrimitive, Clone, Copy)]
+pub enum SubItemTyp {
+    DungeonKey1 = 1,
+    DungeonKey2 = 2,
+    DungeonKey3 = 3,
+    DungeonKey4 = 4,
+    DungeonKey5 = 5,
+    DungeonKey6 = 6,
+    DungeonKey7 = 7,
+    DungeonKey8 = 8,
+    DungeonKey9 = 9,
+    DungeonKey10 = 10,
+    DungeonKey11 = 11,
+    DungeonKey17 = 17,
+    DungeonKey19 = 19,
+    DungeonKey22 = 22,
+    DungeonKey69 = 69,
+    DungeonKey70 = 70,
+    ToiletKey = 20,
+    ShadowDungeonKey51 = 51,
+    ShadowDungeonKey52 = 52,
+    ShadowDungeonKey53 = 53,
+    ShadowDungeonKey54 = 54,
+    ShadowDungeonKey55 = 55,
+    ShadowDungeonKey56 = 56,
+    ShadowDungeonKey57 = 57,
+    ShadowDungeonKey58 = 58,
+    ShadowDungeonKey59 = 59,
+    ShadowDungeonKey60 = 60,
+    ShadowDungeonKey61 = 61,
+    ShadowDungeonKey62 = 62,
+    ShadowDungeonKey63 = 63,
+    ShadowDungeonKey64 = 64,
+    ShadowDungeonKey67 = 67,
+    ShadowDungeonKey68 = 68,
+    EpicItemBag = 10000,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GemValue {
+    Legendary = 4,
+    Strength1 = 10,
+    Strength2 = 20,
+    Strength3 = 30,
+    Dexterity1 = 11,
+    Dexterity2 = 21,
+    Dexterity3 = 31,
+    Intelligence1 = 12,
+    Intelligence2 = 22,
+    Intelligence3 = 32,
+    Constitution1 = 13,
+    Constitution2 = 23,
+    Constitution3 = 33,
+    Luck1 = 14,
+    Luck2 = 24,
+    Luck3 = 34,
+    All1 = 15,
+    All2 = 25,
+    All3 = 35,
+}
+
+pub struct AtrTuple {
+    atr_typ: AtrTyp,
+    atr_val: i64,
+}
+
+pub enum AtrEffect {
+    Simple([Option<AtrTuple>; 3]),
+    Amount(i64),
+    Expires(NaiveDateTime),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AtrTyp {
+    Strength = 1,
+    Dexterity = 2,
+    Intelligence = 3,
+    Constitution = 4,
+    Luck = 5,
+    All = 6,
+    StrengthConstitutionLuck = 21,
+    DexterityConstitutionLuck = 22,
+    IntelligenceConstitutionLuck = 23,
+    QuestGold = 31,
+    EpicChance,
+    ItemQuality,
+    QuestXP,
+    ExtraHitPoints,
+    FireResistance,
+    ColdResistence,
+    LightningResistance,
+    TotalResistence,
+    FireDamage,
+    ColdDamage,
+    LightningDamage,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MainClass {
+    Warrior = 0,
+    Mage = 1,
+    Scout = 2,
+}
+
+pub struct RawItem {
+    item_typ: RawItemTyp,
+    enchantment: Option<Enchantment>,
+    gem_val: Option<GemValue>,
+
+    sub_ident: Option<SubItemTyp>,
+    class: Option<MainClass>,
+    modelid: i32,
+
+    effect_1: i32,
+    effect_2: i32,
+
+    atrs: AtrEffect,
+
+    silver: i32,
+    mushrooms: i32,
+    gem_pwr: i32,
+}
+
+impl RawItem {
+    pub fn serialize(&self, resp: &mut ResponseBuilder) {
+        let mut ident = self.item_typ as i64;
+        ident |= self.enchantment.map(|a| a as i64).unwrap_or_default() << 24;
+        ident |= self.gem_val.map(|a| a as i64).unwrap_or_default() << 16;
+        resp.add_val(ident);
+
+        let mut sub_ident =
+            self.sub_ident.map(|a| a as i64).unwrap_or_default();
+        sub_ident |= self.class.map(|a| a as i64 * 1000).unwrap_or_default();
+        sub_ident |= self.modelid as i64;
+        resp.add_val(sub_ident);
+
+        resp.add_val(self.effect_1 as i64);
+        resp.add_val(self.effect_2 as i64);
+
+        match &self.atrs {
+            AtrEffect::Simple(atrs) => {
+                for atr in atrs {
+                    match atr {
+                        Some(x) => resp.add_val(x.atr_typ as i64),
+                        None => resp.add_val(0),
+                    };
+                }
+                for atr in atrs {
+                    match atr {
+                        Some(x) => resp.add_val(x.atr_val),
+                        None => resp.add_val(0),
+                    };
+                }
+            }
+            AtrEffect::Amount(amount) => {
+                for _ in 0..3 {
+                    resp.add_val(0);
+                }
+                resp.add_val(amount);
+                for _ in 0..2 {
+                    resp.add_val(0);
+                }
+            }
+            AtrEffect::Expires(expires) => {
+                resp.add_val(to_seconds(*expires));
+                for _ in 0..5 {
+                    resp.add_val(0);
+                }
+            }
+        }
+
+        resp.add_val(self.silver as i64);
+        resp.add_val(self.mushrooms as i64 | (self.gem_pwr as i64) << 16);
+    }
+}
+
+pub async fn get_items(ids: Vec<i32>) -> Vec<RawItem> {
+    let mut items = Vec::with_capacity(ids.len());
+
+    // let Ok(info) = sqlx::query!()
+
+    items
+}
+
 impl Portrait {
     pub fn parse(portrait: &str) -> Option<Portrait> {
         let mut portrait_vals: Vec<i32> = Vec::new();
@@ -870,8 +1236,8 @@ async fn player_poll(
     pid: i32,
     tracking: &str,
     db: &Pool<Postgres>,
+    mut builder: ResponseBuilder,
 ) -> Response {
-    let mut builder = ResponseBuilder::default();
     let resp = builder
         .add_key("serverversion")
         .add_val(SERVER_VERSION)
@@ -886,21 +1252,22 @@ async fn player_poll(
             portrait.mouth, portrait.Hair, portrait.Brows, portrait.Eyes, \
          portrait.Beards, portrait.Nose, portrait.Ears, portrait.Extra, \
          portrait.Horns, tavern.tfa, tavern.BeerDrunk, tavern.QuickSand, \
-         tavern.DiceGamesRemaining, tavern.DiceGameNextFree,
-         q1.XP as q1xp, q3.XP as q3xp, q2.XP as q2xp,
-         q1.Silver as q1silver, q3.SILVER as q3silver, q2.SILVER as q2silver,
-         q1.Flavour1 as q1f1, q1.Flavour2 as q1f2, q1.Monster as q1monster, \
-         q1.Location as q1location, q1.length as q1length, q1.item as q1item,
-         q2.Flavour1 as q2f1, q2.Flavour2 as q2f2, q2.Monster as q2monster, \
-         q2.Location as q2location, q2.length as q2length, q2.item as q2item,
-         q3.Flavour1 as q3f1, q3.Flavour2 as q3f2, q3.Monster as q3monster, \
-         q3.Location as q3location, q3.length as q3length, q3.item as q3item
-        FROM CHARACTER LEFT JOIN logindata on logindata.id = \
-         character.logindata LEFT JOIN portrait on portrait.id = \
-         character.portrait LEFT JOIN tavern on tavern.id = character.tavern \
-         LEFT JOIN quest as q1 on tavern.quest1 = q1.id LEFT JOIN quest as q2 \
-         on tavern.quest2 = q2.id LEFT JOIN quest as q3 on tavern.quest2 = \
-         q3.id WHERE character.id = $1",
+         tavern.DiceGamesRemaining, tavern.DiceGameNextFree, activity.typ as \
+         activitytyp, activity.subtyp as activitysubtyp, activity.busyuntil, \
+         q1.XP as q1xp, q3.XP as q3xp, q2.XP as q2xp, q1.Silver as q1silver, \
+         q3.SILVER as q3silver, q2.SILVER as q2silver, q1.Flavour1 as q1f1, \
+         q1.Flavour2 as q1f2, q1.Monster as q1monster, q1.Location as \
+         q1location, q1.length as q1length, q1.item as q1item, q2.Flavour1 as \
+         q2f1, q2.Flavour2 as q2f2, q2.Monster as q2monster, q2.Location as \
+         q2location, q2.length as q2length, q2.item as q2item, q3.Flavour1 as \
+         q3f1, q3.Flavour2 as q3f2, q3.Monster as q3monster, q3.Location as \
+         q3location, q3.length as q3length, q3.item as q3item FROM CHARACTER \
+         LEFT JOIN logindata on logindata.id = character.logindata LEFT JOIN \
+         activity on activity.id = character.activity LEFT JOIN portrait on \
+         portrait.id = character.portrait LEFT JOIN tavern on tavern.id = \
+         character.tavern LEFT JOIN quest as q1 on tavern.quest1 = q1.id LEFT \
+         JOIN quest as q2 on tavern.quest2 = q2.id LEFT JOIN quest as q3 on \
+         tavern.quest2 = q3.id WHERE character.id = $1",
         pid
     )
     .fetch_one(db)
@@ -1047,9 +1414,9 @@ async fn player_poll(
         resp.add_val(0); // 40..=44
     }
 
-    resp.add_val(0); // Current action
-    resp.add_val(0); // Secondary (time busy)
-    resp.add_val(0); // Busy until
+    resp.add_val(player.activitytyp); // Current action
+    resp.add_val(player.activitysubtyp); // Secondary (time busy)
+    resp.add_val(to_seconds_opt(player.busyuntil)); // Busy until
 
     // Equipment
     for _ in 0..10 {
@@ -1058,8 +1425,32 @@ async fn player_poll(
         }
     }
 
+    let weapon = RawItem {
+        item_typ: RawItemTyp::Weapon,
+        enchantment: None,
+        gem_val: None,
+        sub_ident: None,
+        class: Some(MainClass::Mage),
+        modelid: 7,
+        effect_1: 100,
+        effect_2: 200,
+        atrs: AtrEffect::Simple([
+            Some(AtrTuple {
+                atr_typ: AtrTyp::Intelligence,
+                atr_val: 50,
+            }),
+            None,
+            None,
+        ]),
+        silver: 100,
+        mushrooms: 0,
+        gem_pwr: 0,
+    };
+
+    weapon.serialize(resp);
+
     // Inventory bag
-    for _ in 0..5 {
+    for _ in 0..4 {
         for _ in 0..12 {
             resp.add_val(0); // 168..=227
         }
