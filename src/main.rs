@@ -5,6 +5,7 @@ use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use serde::{Deserialize, Serialize};
 use sf_api::{
     command::AttributeType,
     gamestate::{
@@ -997,7 +998,7 @@ pub struct Portrait {
     horns: i32,
 }
 
-#[derive(Debug, FromPrimitive, Clone, Copy)]
+#[derive(Debug, FromPrimitive, Clone, Copy, Serialize, Deserialize)]
 pub enum RawItemTyp {
     Weapon = 1,
     Shield,
@@ -1020,7 +1021,7 @@ pub enum RawItemTyp {
     Mannequin,
 }
 
-#[derive(Debug, FromPrimitive, Clone, Copy)]
+#[derive(Debug, FromPrimitive, Clone, Copy, Serialize, Deserialize)]
 pub enum SubItemTyp {
     DungeonKey1 = 1,
     DungeonKey2 = 2,
@@ -1058,7 +1059,7 @@ pub enum SubItemTyp {
     EpicItemBag = 10000,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum GemValue {
     Legendary = 4,
     Strength1 = 10,
@@ -1081,18 +1082,20 @@ pub enum GemValue {
     All3 = 35,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AtrTuple {
     atr_typ: AtrTyp,
     atr_val: i64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AtrEffect {
     Simple([Option<AtrTuple>; 3]),
     Amount(i64),
     Expires(NaiveDateTime),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AtrTyp {
     Strength = 1,
     Dexterity = 2,
@@ -1117,13 +1120,14 @@ pub enum AtrTyp {
     LightningDamage,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum MainClass {
     Warrior = 0,
     Mage = 1,
     Scout = 2,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RawItem {
     item_typ: RawItemTyp,
     enchantment: Option<Enchantment>,
@@ -1144,7 +1148,7 @@ pub struct RawItem {
 }
 
 impl RawItem {
-    pub fn serialize(&self, resp: &mut ResponseBuilder) {
+    pub fn serialize_response(&self, resp: &mut ResponseBuilder) {
         let mut ident = self.item_typ as i64;
         ident |= self.enchantment.map(|a| a as i64).unwrap_or_default() << 24;
         ident |= self.gem_val.map(|a| a as i64).unwrap_or_default() << 16;
@@ -1447,7 +1451,9 @@ async fn player_poll(
         gem_pwr: 0,
     };
 
-    weapon.serialize(resp);
+    let str = std::fs::read_to_string("weapon.json").unwrap();
+    let weapon: RawItem = serde_json::from_str(&str).unwrap();
+    weapon.serialize_response(resp);
 
     // Inventory bag
     for _ in 0..4 {
