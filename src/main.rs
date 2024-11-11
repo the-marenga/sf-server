@@ -8,7 +8,6 @@ use axum::{
 };
 use base64::Engine;
 use libsql::{params, Row, Rows};
-use log::info;
 use misc::{from_sf_string, to_sf_string};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -62,8 +61,6 @@ pub async fn connect_init_db() -> Result<libsql::Connection, ServerError> {
         .build()
         .await?
         .connect()?;
-    // db.execute_batch(include_str!("../db.sql")).await?;
-    // info!("Reset DB");
     Ok(db)
 }
 
@@ -121,8 +118,7 @@ async fn request(
                     "SELECT character.id, cryptokey
                  FROM character
                  LEFT JOIN Logindata on logindata.id = character.logindata
-                 WHERE cryptoid = ?1
-            ",
+                 WHERE cryptoid = ?1",
                     [crypto_id],
                 )
                 .await
@@ -464,18 +460,14 @@ async fn request(
         "PlayerSetDescription" => {
             let description = command_args.get_str(0, "description")?;
             let _description = from_sf_string(description);
-            todo!()
-            // if sqlx::query!(
-            //     "UPDATE Character SET description = ?1 WHERE id = ?2",
-            //     &description, player_id
-            // )
-            // .execute(&db)
-            // .await
-            // .is_err()
-            // {
-            //     return INTERNAL_ERR;
-            // };
-            // player_poll(player_id, "", &db, Default::default()).await
+            db.query(
+                "UPDATE Character SET description = ?1 WHERE id = ?2",
+                params!(&description, player_id),
+            )
+            .await
+            .map_err(ServerError::DBError)?;
+
+            Ok(player_poll(player_id, "", &db, Default::default()).await?)
         }
         "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
             .add_key("helpshiftauthtoken")
@@ -1129,7 +1121,7 @@ pub enum MainClass {
 pub struct RawItem {
     item_typ: RawItemTyp,
     enchantment: Option<Enchantment>,
-    gem_val: Option<GemValue>,
+    gem_val: i64,
 
     sub_ident: Option<SubItemTyp>,
     class: Option<MainClass>,
@@ -1149,7 +1141,7 @@ impl RawItem {
     pub fn serialize_response(&self, resp: &mut ResponseBuilder) {
         let mut ident = self.item_typ as i64;
         ident |= self.enchantment.map(|a| a as i64).unwrap_or_default() << 24;
-        ident |= self.gem_val.map(|a| a as i64).unwrap_or_default() << 16;
+        ident |= self.gem_val << 16;
         resp.add_val(ident);
 
         let mut sub_ident =
@@ -1504,7 +1496,7 @@ async fn player_poll(
     weapon.serialize_response(resp);
 
     // Inventory bag
-    for _ in 0..5 {
+    for _ in 0..4 {
         for _ in 0..12 {
             resp.add_val(0); // 168..=227
         }
@@ -1948,7 +1940,7 @@ async fn player_poll(
     resp.add_str(&to_sf_string(res.get_str(51)?));
 
     resp.add_key("ownplayername.r");
-    resp.add_str(res.get_str(51)?);
+    resp.add_str(res.get_str(52)?);
 
     let rank_ref = db
         .query("SELECT count(*) FROM character", params!())
@@ -1970,7 +1962,7 @@ async fn player_poll(
 
     resp.add_key("timestamp");
 
-    resp.add_val(in_seconds(0));
+    resp.add_val(now());
 
     resp.add_key("fortressprice.fortressPrice(13)");
     resp.add_str(
@@ -2118,8 +2110,41 @@ async fn player_poll(
 
     resp.skip_key();
 
+    resp.add_key("expeditions");
+    resp.add_val(33);
+    resp.add_val(71);
+    resp.add_val(32);
+    resp.add_val(91);
+    resp.add_val(10);
+    resp.add_val(5);
+    resp.add_val(1500);
+    resp.add_val(0);
+
+    resp.add_val(124);
+    resp.add_val(44);
+    resp.add_val(91);
+    resp.add_val(71);
+    resp.add_val(16);
+    resp.add_val(5);
+    resp.add_val(6000);
+    resp.add_val(0);
+
     resp.add_key("expeditionevent");
-    resp.add_str("0/0/0/0");
+    resp.add_val(in_seconds(- 60 * 60));
+    resp.add_val(in_seconds(60 * 60));
+    resp.add_val(1);
+    resp.add_val(in_seconds(60 * 60));
+
+    resp.add_key("usersettings");
+    resp.add_str("en");
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_str("a");
+    resp.add_val(0);
+
+    resp.add_key("mailinvoice");
+    resp.add_str("a*******@a****.***");
 
     resp.add_key("cryptoid");
     resp.add_val(res.get_str(53)?);

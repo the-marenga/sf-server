@@ -1,11 +1,11 @@
 {
   "item_typ": "Weapon",
   "enchantment": null,
-  "gem_val": "All1",
+  "gem_val": 1,
   "sub_ident": null,
-  "class": "Warrior",
+  "class": "Mage",
   "modelid": 6,
-  "effect_1": 10,
+  "effect_1": 100,
   "effect_2": 100,
   "atrs": {
     "Simple": [
@@ -17,7 +17,7 @@
       null
     ]
   },
-  "silver": 111,
-  "mushrooms": 1,
+  "silver": 1000,
+  "mushrooms": 100,
   "gem_pwr": 100
 }
