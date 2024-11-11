@@ -2257,7 +2257,6 @@ dependencies = [
  "async-once-cell",
  "axum 0.7.7",
  "base64 0.21.7",
- "chrono",
  "fastrand",
  "libaes",
  "libsql",
