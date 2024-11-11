@@ -1329,7 +1329,7 @@ dependencies = [
  "tonic",
  "tonic-web",
  "tower 0.4.13",
- "tower-http",
+ "tower-http 0.4.4",
  "tracing",
  "uuid",
  "zerocopy",
@@ -2261,6 +2261,7 @@ dependencies = [
  "fastrand",
  "libaes",
  "libsql",
+ "log",
  "num-derive",
  "num-traits",
  "once_cell",
@@ -2271,6 +2272,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.3",
  "tokio",
+ "tower-http 0.6.1",
  "tracing-subscriber",
 ]
 
@@ -2653,7 +2655,7 @@ dependencies = [
  "pin-project",
  "tokio-stream",
  "tonic",
- "tower-http",
+ "tower-http 0.4.4",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -2713,6 +2715,20 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8437150ab6bbc8c5f0f519e3d5ed4aa883a83dd4cdd3d1b21f9482936046cb97"
+dependencies = [
+ "bitflags 2.6.0",
+ "bytes",
+ "http 1.1.0",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]

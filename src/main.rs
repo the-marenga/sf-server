@@ -1,43 +1,34 @@
 use std::{collections::HashMap, time::Duration};
 
 use axum::{
-    body::{Body, Bytes},
-    extract::{Extension, Json, Path, Query, Request},
-    http::header::HeaderMap,
-    response::Response,
-    routing::{get, post},
-    Router,
+    extract::Query, http::Method, response::Response, routing::get, Router,
 };
 use base64::Engine;
 use chrono::{Local, NaiveDateTime};
+use libsql::{params, Row, Rows, Value};
+use log::info;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use serde::{Deserialize, Serialize};
-use sf_api::{
-    command::AttributeType,
-    gamestate::{
-        character::{Class, Gender, Race},
-        items::Enchantment,
-    },
+use sf_api::gamestate::{
+    character::{Class, Gender, Race},
+    items::Enchantment,
 };
-use strum::EnumCount;
+use tower_http::cors::CorsLayer;
 
-use crate::{
-    misc::{from_sf_string, to_sf_string},
-    response::*,
-};
+use crate::{misc::from_sf_string, response::*};
 
 #[tokio::main]
 async fn main() {
     // initialize tracing
     tracing_subscriber::fmt::init();
+    let db = get_db().await.unwrap();
+    let cors = CorsLayer::new()
+        .allow_headers(tower_http::cors::Any)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_origin(tower_http::cors::Any);
 
-    // build our application with a route
-    let app = Router::new()
-        // `GET /` goes to `root`
-        .route("/req.php", get(request));
-
-    // run our app with hyper, listening globally on port 3000
+    let app = Router::new().route("/req.php", get(request)).layer(cors);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -65,8 +56,8 @@ pub async fn connect_init_db() -> Result<libsql::Connection, ServerError> {
         .build()
         .await?
         .connect()?;
-
     db.execute_batch(include_str!("../db.sql")).await?;
+    info!("Reset DB");
     Ok(db)
 }
 
@@ -97,10 +88,13 @@ impl<'a> CommandArguments<'a> {
     }
 }
 
-async fn request(info: String) -> Result<Response, Response> {
-    todo!();
-    let request = String::new();
-    let db = get_db().await.unwrap();
+async fn request(
+    Query(req_params): Query<HashMap<String, String>>,
+) -> Result<Response, Response> {
+    let request = req_params
+        .get("req")
+        .ok_or_else(|| ServerError::BadRequest)?;
+    let db = get_db().await?;
 
     if request.len() < DEFAULT_CRYPTO_ID.len() + 5 {
         Err(ServerError::BadRequest)?;
@@ -120,7 +114,7 @@ async fn request(info: String) -> Result<Response, Response> {
             //     "SELECT cryptokey, character.id
             //      FROM character
             //      LEFT JOIN Logindata on logindata.id = character.logindata
-            //      WHERE cryptoid = $1",
+            //      WHERE cryptoid = ?1",
             //     crypto_id
             // )
             // .fetch_optional(&db)
@@ -177,7 +171,7 @@ async fn request(info: String) -> Result<Response, Response> {
             // };
 
             // let Ok(portrait_id) = sqlx::query_scalar!(
-            //     "UPDATE CHARACTER SET gender = $1, race = $2 WHERE id = $3 \
+            //     "UPDATE CHARACTER SET gender = ?1, race = ?2 WHERE id = ?3 \
             //      RETURNING portrait",
             //     gender as i32 + 1,
             //     race as i32,
@@ -191,9 +185,9 @@ async fn request(info: String) -> Result<Response, Response> {
             // };
 
             // if sqlx::query_scalar!(
-            //     "UPDATE PORTRAIT SET Mouth = $1, Hair = $2, Brows = $3, Eyes \
-            //      = $4, Beards = $5, Nose = $6, Ears = $7, Horns = $8, extra = \
-            //      $9 WHERE ID = $10",
+            //     "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, Eyes \
+            //      = ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = ?8, extra = \
+            //      ?9 WHERE ID = ?10",
             //     portrait.mouth,
             //     portrait.hair,
             //     portrait.eyebrows,
@@ -223,14 +217,18 @@ async fn request(info: String) -> Result<Response, Response> {
             let password = command_args.get_str(1, "password")?;
             let mail = command_args.get_str(2, "mail")?;
             let gender = command_args.get_int(3, "gender")?;
-            let gender = Gender::from_i64(gender.saturating_sub(1));
-            let race = Race::from_i64(command_args.get_int(4, "race")?);
+            let gender = Gender::from_i64(gender.saturating_sub(1))
+                .ok_or_else(|| ServerError::BadRequest)?;
+            let race = Race::from_i64(command_args.get_int(4, "race")?)
+                .ok_or_else(|| ServerError::BadRequest)?;
 
             let class = command_args.get_int(5, "class")?;
-            let class = Class::from_i64(class.saturating_sub(1));
+            let class = Class::from_i64(class.saturating_sub(1))
+                .ok_or_else(|| ServerError::BadRequest)?;
 
             let portrait_str = command_args.get_str(6, "portrait")?;
-            let portrait = Portrait::parse(portrait_str);
+            let portrait = Portrait::parse(portrait_str)
+                .ok_or_else(|| ServerError::BadRequest)?;
 
             if is_invalid_name(name) {
                 Err(ServerError::InvalidName)?;
@@ -253,169 +251,132 @@ async fn request(info: String) -> Result<Response, Response> {
                 .map(|_| rng.alphanumeric())
                 .collect();
 
-            todo!();
+            let tx = db.transaction().await.map_err(ServerError::DBError)?;
 
-            // let Ok(mut tx) = db.begin().await else {
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO LOGINDATA (mail, pwhash, SessionID, \
+                     CryptoID, CryptoKey) VALUES (?1, ?2, ?3, ?4, ?5) \
+                     returning ID",
+                    params!(
+                        mail, hashed_password, session_id, crypto_id,
+                        crypto_key
+                    ),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
 
-            // let Ok(login_id) = sqlx::query_scalar!(
-            //     "INSERT INTO LOGINDATA (mail, pwhash, SessionID, CryptoID, \
-            //      CryptoKey) VALUES ($1, $2, $3, $4, $5) returning ID",
-            //     mail,
-            //     hashed_password,
-            //     session_id,
-            //     crypto_id,
-            //     crypto_key
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let login_id = first_int(&mut res).await?;
 
-            // let mut quests = [0; 3];
-            // #[allow(clippy::needless_range_loop)]
-            // for i in 0..3 {
-            //     let Ok(quest_id) = sqlx::query_scalar!(
-            //         "INSERT INTO QUEST (monster, location, length) VALUES \
-            //          ($1, $2, $3) returning ID",
-            //         139,
-            //         1,
-            //         60,
-            //     )
-            //     .fetch_one(&mut *tx)
-            //     .await
-            //     else {
-            //         _ = tx.rollback().await;
-            //         return INTERNAL_ERR;
-            //     };
-            //     quests[i] = quest_id;
-            // }
+            let mut quests = [0; 3];
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..3 {
+                let mut res = tx
+                    .query(
+                        "INSERT INTO QUEST (monster, location, length, xp, \
+                         silver, mushrooms)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6) returning ID",
+                        [139, 1, 60, 100, 100, 1],
+                    )
+                    .await
+                    .map_err(ServerError::DBError)?;
+                quests[i] = first_int(&mut res).await?;
+            }
 
-            // let Ok(tavern_id) = sqlx::query_scalar!(
-            //     "INSERT INTO TAVERN (quest1, quest2, quest3) VALUES ($1, $2, \
-            //      $3) returning ID",
-            //     quests[0],
-            //     quests[1],
-            //     quests[2],
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO TAVERN (quest1, quest2, quest3)
+                    VALUES (?1, ?2, ?3) returning ID",
+                    quests,
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let tavern_id = first_int(&mut res).await?;
 
-            // let Ok(bag_id) = sqlx::query_scalar!(
-            //     "INSERT INTO BAG (pos1) VALUES (NULL) returning ID",
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO BAG (pos1) VALUES (NULL) returning ID",
+                    params!(),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let bag_id = first_int(&mut res).await?;
 
-            // let Ok(attr_id) = sqlx::query_scalar!(
-            //     "INSERT INTO Attributes
-            //     ( Strength, Dexterity, Intelligence, Stamina, Luck )
-            //     VALUES ($1, $2, $3, $4, $5) returning ID",
-            //     3,
-            //     6,
-            //     8,
-            //     2,
-            //     4
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO Attributes
+                     ( Strength, Dexterity, Intelligence, Stamina, Luck )
+                     VALUES (?1, ?2, ?3, ?4, ?5) returning ID",
+                    [3, 6, 8, 2, 4],
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let attr_id = first_int(&mut res).await?;
 
-            // let Ok(attr_upgrades) = sqlx::query_scalar!(
-            //     "INSERT INTO Attributes
-            //     ( Strength, Dexterity, Intelligence, Stamina, Luck )
-            //     VALUES ($1, $2, $3, $4, $5) returning ID",
-            //     0,
-            //     0,
-            //     0,
-            //     0,
-            //     0
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO Attributes
+                    ( Strength, Dexterity, Intelligence, Stamina, Luck )
+                    VALUES (?1, ?2, ?3, ?4, ?5) returning ID",
+                    [0, 0, 0, 0, 0],
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let attr_upgrades = first_int(&mut res).await?;
 
-            // let Ok(portrait_id) = sqlx::query_scalar!(
-            //     "INSERT INTO PORTRAIT (Mouth, Hair, Brows, Eyes, Beards, \
-            //      Nose, Ears, Horns, extra) VALUES ($1, $2, $3, $4, $5, $6, \
-            //      $7, $8, $9) returning ID",
-            //     portrait.mouth,
-            //     portrait.hair,
-            //     portrait.eyebrows,
-            //     portrait.eyes,
-            //     portrait.beard,
-            //     portrait.nose,
-            //     portrait.ears,
-            //     portrait.horns,
-            //     portrait.extra
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO PORTRAIT (Mouth, Hair, Brows, Eyes, Beards, \
+                     Nose, Ears, Horns, extra) VALUES (?1, ?2, ?3, ?4, ?5, \
+                     ?6, ?7, ?8, ?9) returning ID",
+                    params!(
+                        portrait.mouth, portrait.hair, portrait.eyebrows,
+                        portrait.eyes, portrait.beard, portrait.nose,
+                        portrait.ears, portrait.horns, portrait.extra
+                    ),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let portrait_id = first_int(&mut res).await?;
 
-            // let Ok(activity_id) = sqlx::query_scalar!(
-            //     "INSERT INTO Activity (typ) VALUES (0) RETURNING ID",
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = tx
+                .query(
+                    "INSERT INTO Activity (typ) VALUES (0) RETURNING ID",
+                    params!(),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let activity_id = first_int(&mut res).await?;
 
-            // if sqlx::query_scalar!(
-            //     "INSERT INTO Character
-            //     (Name, Class, Attributes, AttributesBought, LoginData, Tavern, \
-            //      Bag, Portrait, Gender, Race, Activity)
-            //     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-            //     name,
-            //     class as i32 + 1,
-            //     attr_id,
-            //     attr_upgrades,
-            //     login_id,
-            //     tavern_id,
-            //     bag_id,
-            //     portrait_id,
-            //     gender as i32 + 1,
-            //     race as i32,
-            //     activity_id
-            // )
-            // .execute(&mut *tx)
-            // .await
-            // .is_err()
-            // {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            tx
+                .query(
+                    "INSERT INTO Character
+                    (Name, Class, Attributes, AttributesBought, LoginData,
+                    Tavern, Bag, Portrait, Gender, Race, Activity)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    params!(
+                        name,
+                        class as i32 + 1,
+                        attr_id,
+                        attr_upgrades,
+                        login_id,
+                        tavern_id,
+                        bag_id,
+                        portrait_id,
+                        gender as i32 + 1,
+                        race as i32,
+                        activity_id
+                    ),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
 
-            // if tx.commit().await.is_err() {
-            //     return INTERNAL_ERR;
-            // };
+            tx.commit().await.map_err(ServerError::DBError)?;
 
-            // ResponseBuilder::default()
-            //     .add_key("tracking.s")
-            //     .add_str("signup")
-            //     .build()
+            ResponseBuilder::default()
+                .add_key("tracking.s")
+                .add_str("signup")
+                .build()
         }
         "AccountLogin" => {
             let name = command_args.get_str(0, "name")?;
@@ -426,7 +387,7 @@ async fn request(info: String) -> Result<Response, Response> {
             // let Ok(info) = sqlx::query!(
             //     "SELECT character.id, pwhash, character.logindata FROM \
             //      character LEFT JOIN logindata on logindata.id = \
-            //      character.logindata WHERE lower(name) = lower($1)",
+            //      character.logindata WHERE lower(name) = lower(?1)",
             //     name
             // )
             // .fetch_one(&db)
@@ -453,8 +414,8 @@ async fn request(info: String) -> Result<Response, Response> {
 
             // if sqlx::query!(
             //     "UPDATE logindata
-            //     set sessionid = $2, cryptoid = $3
-            //     where id = $1",
+            //     set sessionid = ?2, cryptoid = ?3
+            //     where id = ?1",
             //     info.logindata,
             //     session_id,
             //     crypto_id
@@ -477,7 +438,7 @@ async fn request(info: String) -> Result<Response, Response> {
             let description = from_sf_string(description);
             todo!()
             // if sqlx::query!(
-            //     "UPDATE Character SET description = $1 WHERE id = $2",
+            //     "UPDATE Character SET description = ?1 WHERE id = ?2",
             //     &description, player_id
             // )
             // .execute(&db)
@@ -504,7 +465,7 @@ async fn request(info: String) -> Result<Response, Response> {
                     let name = name?;
                     todo!()
                     // let Ok(info) = sqlx::query!(
-                    //     "SELECT honor, id from character where name = $1", name
+                    //     "SELECT honor, id from character where name = ?1", name
                     // )
                     // .fetch_one(&db)
                     // .await
@@ -513,8 +474,8 @@ async fn request(info: String) -> Result<Response, Response> {
                     // };
 
                     // let Ok(Some(rank)) = sqlx::query_scalar!(
-                    //     "SELECT count(*) from character where honor > $1 OR \
-                    //      honor = $1 AND id <= $2",
+                    //     "SELECT count(*) from character where honor > ?1 OR \
+                    //      honor = ?1 AND id <= ?2",
                     //     info.honor,
                     //     info.id
                     // )
@@ -533,8 +494,8 @@ async fn request(info: String) -> Result<Response, Response> {
             todo!();
             // let Ok(results) = sqlx::query!(
             //     "SELECT id, level, name, class, honor FROM CHARACTER ORDER BY \
-            //      honor desc, id OFFSET $1
-            //      LIMIT $2",
+            //      honor desc, id OFFSET ?1
+            //      LIMIT ?2",
             //     offset,
             //     limit,
             // )
@@ -582,7 +543,7 @@ async fn request(info: String) -> Result<Response, Response> {
             // let Ok(info) = sqlx::query!(
             //     "SELECT character.id, pwhash FROM character LEFT JOIN \
             //      logindata on logindata.id = character.logindata WHERE \
-            //      lower(name) = lower($1)",
+            //      lower(name) = lower(?1)",
             //     name,
             // )
             // .fetch_one(&db)
@@ -597,7 +558,7 @@ async fn request(info: String) -> Result<Response, Response> {
             //     return ServerError::WrongPassword.resp();
             // }
 
-            // match sqlx::query!("DELETE FROM character WHERE id = $1", info.id)
+            // match sqlx::query!("DELETE FROM character WHERE id = ?1", info.id)
             //     .execute(&db)
             //     .await
             // {
@@ -641,7 +602,7 @@ async fn request(info: String) -> Result<Response, Response> {
             //      TAVERN on character.tavern = tavern.id LEFT JOIN Quest as q1 \
             //      on q1.id = tavern.Quest1 LEFT JOIN Quest as q2 on q2.id = \
             //      tavern.Quest2 LEFT JOIN Quest as q3 on q3.id = tavern.Quest3 \
-            //      WHERE character.id = $1",
+            //      WHERE character.id = ?1",
             //     player_id
             // )
             // .fetch_one(&mut *tx)
@@ -667,8 +628,8 @@ async fn request(info: String) -> Result<Response, Response> {
             //     * mount_effect;
 
             // if sqlx::query!(
-            //     "UPDATE activity SET TYP = 1, SUBTYP = $2, BUSYUNTIL = $3, \
-            //      STARTED = CURRENT_TIMESTAMP WHERE id = $1",
+            //     "UPDATE activity SET TYP = 1, SUBTYP = ?2, BUSYUNTIL = ?3, \
+            //      STARTED = CURRENT_TIMESTAMP WHERE id = ?1",
             //     info.activityid,
             //     quest as i32,
             //     Local::now().naive_local()
@@ -708,7 +669,7 @@ async fn request(info: String) -> Result<Response, Response> {
             //      on tavern.quest1 = q1.id LEFT JOIN quest as q2 on \
             //      tavern.quest2 = q2.id LEFT JOIN quest as q3 on tavern.quest2 \
             //      = q3.id LEFT JOIN ACTIVITY ON activity.id = \
-            //      character.activity WHERE character.id = $1",
+            //      character.activity WHERE character.id = ?1",
             //     player_id
             // )
             // .fetch_one(&db)
@@ -861,7 +822,7 @@ async fn request(info: String) -> Result<Response, Response> {
 
             // let Ok(player) = sqlx::query!(
             //     "SELECT silver, mushrooms, mount, mountend FROM CHARACTER \
-            //      WHERE id = $1",
+            //      WHERE id = ?1",
             //     player_id
             // )
             // .fetch_one(&mut *tx)
@@ -907,8 +868,8 @@ async fn request(info: String) -> Result<Response, Response> {
             // };
 
             // if sqlx::query!(
-            //     "UPDATE Character SET mount = $1, mountend = $2, mushrooms = \
-            //      $4, silver = $5 WHERE id = $3",
+            //     "UPDATE Character SET mount = ?1, mountend = ?2, mushrooms = \
+            //      ?4, silver = ?5 WHERE id = ?3",
             //     mount,
             //     mount_start + Duration::from_secs(60 * 60 * 24 * 14),
             //     player_id,
@@ -938,7 +899,7 @@ async fn request(info: String) -> Result<Response, Response> {
             }
             todo!();
             // match sqlx::query!(
-            //     "UPDATE CHARACTER SET tutorialstatus = $1 WHERE ID = $2",
+            //     "UPDATE CHARACTER SET tutorialstatus = ?1 WHERE ID = ?2",
             //     status as i32, player_id,
             // )
             // .execute(&db)
@@ -956,26 +917,23 @@ async fn request(info: String) -> Result<Response, Response> {
             if is_invalid_name(name) {
                 return Err(ServerError::InvalidName)?;
             }
-            todo!()
-            // let Ok(count) = sqlx::query_scalar!(
-            //     "SELECT COUNT(*) FROM CHARACTER WHERE name = $1", name
-            // )
-            // .fetch_one(&db)
-            // .await
-            // else {
-            //     return INTERNAL_ERR;
-            // };
 
-            // match count {
-            //     Some(0) => ResponseBuilder::default()
-            //         .add_key("serverversion")
-            //         .add_val(SERVER_VERSION)
-            //         .add_key("preregister")
-            //         .add_val(0)
-            //         .add_val(0)
-            //         .build(),
-            //     _ => ServerError::CharacterExists.resp(),
-            // }
+            let mut res = db
+                .query("SELECT COUNT(*) FROM CHARACTER WHERE name = ?1", [name])
+                .await
+                .map_err(ServerError::DBError)?;
+            let count = first_int(&mut res).await?;
+
+            match count {
+                0 => ResponseBuilder::default()
+                    .add_key("serverversion")
+                    .add_val(SERVER_VERSION)
+                    .add_key("preregister")
+                    .add_val(0)
+                    .add_val(0)
+                    .build(),
+                _ => Err(ServerError::CharacterExists.into()),
+            }
         }
         _ => {
             println!("Unknown command: {command_name} - {:?}", command_args);
@@ -1213,7 +1171,7 @@ impl RawItem {
 }
 
 pub async fn get_items(ids: Vec<i32>) -> Vec<RawItem> {
-    let mut items = Vec::with_capacity(ids.len());
+    let items = Vec::with_capacity(ids.len());
 
     // let Ok(info) = sqlx::query!()
 
@@ -1285,7 +1243,7 @@ async fn player_poll(
     //      portrait.id = character.portrait LEFT JOIN tavern on tavern.id = \
     //      character.tavern LEFT JOIN quest as q1 on tavern.quest1 = q1.id LEFT \
     //      JOIN quest as q2 on tavern.quest2 = q2.id LEFT JOIN quest as q3 on \
-    //      tavern.quest2 = q3.id WHERE character.id = $1",
+    //      tavern.quest2 = q3.id WHERE character.id = ?1",
     //     pid
     // )
     // .fetch_one(db)
@@ -1383,8 +1341,8 @@ async fn player_poll(
     // resp.add_val(player.honor); // Honor
 
     // let Ok(Some(rank)) = sqlx::query_scalar!(
-    //     "SELECT count(*) from character where honor > $1 OR honor = $1 AND ID \
-    //      <= $2",
+    //     "SELECT count(*) from character where honor > ?1 OR honor = ?1 AND ID \
+    //      <= ?2",
     //     player.honor,
     //     pid
     // )
@@ -2180,4 +2138,20 @@ fn decrypt_server_request(to_decrypt: &str, key: &str) -> String {
     let decrypted = cipher.cbc_decrypt(CRYPTO_IV.as_bytes(), &text);
 
     String::from_utf8(decrypted).unwrap()
+}
+
+fn get_row(input: Result<Option<Row>, libsql::Error>) -> Result<Row, Response> {
+    Ok(input
+        .map_err(ServerError::DBError)?
+        .ok_or_else(|| ServerError::Internal)?)
+}
+
+async fn first_row(input: &mut Rows) -> Result<Row, Response> {
+    get_row(input.next().await)
+}
+
+async fn first_int(input: &mut Rows) -> Result<i64, Response> {
+    let row = get_row(input.next().await)?;
+    let val = row.get_value(0).map_err(ServerError::DBError)?;
+    Ok(*val.as_integer().ok_or_else(|| ServerError::Internal)?)
 }

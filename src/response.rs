@@ -33,16 +33,16 @@ pub enum ServerError {
     UnknownRequest,
     #[error("command missing argument: {0}")]
     MissingArgument(&'static str),
-    #[error("internal server error")]
-    Internal,
     #[error("need more gold")]
     NotEnoughMoney,
     #[error("still busy")]
     StillBusy,
     #[error("cannot do this right now2")]
     NotRightNow2,
-    #[error("internal error")]
+    #[error("internal server error: {0}")]
     DBError(#[from] libsql::Error),
+    #[error("internal server error")]
+    Internal,
 }
 
 impl From<ServerError> for Response {
