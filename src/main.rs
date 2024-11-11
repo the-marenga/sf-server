@@ -5,7 +5,7 @@ use axum::{
 };
 use base64::Engine;
 use chrono::{Local, NaiveDateTime};
-use libsql::{params, Row, Rows, Value};
+use libsql::{params, Row, Rows};
 use log::info;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -253,7 +253,7 @@ async fn request(
 
             let tx = db.transaction().await.map_err(ServerError::DBError)?;
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO LOGINDATA (mail, pwhash, SessionID, \
                      CryptoID, CryptoKey) VALUES (?1, ?2, ?3, ?4, ?5) \
@@ -266,12 +266,12 @@ async fn request(
                 .await
                 .map_err(ServerError::DBError)?;
 
-            let login_id = first_int(&mut res).await?;
+            let login_id = first_int(res).await?;
 
             let mut quests = [0; 3];
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
-                let mut res = tx
+                let res = tx
                     .query(
                         "INSERT INTO QUEST (monster, location, length, xp, \
                          silver, mushrooms)
@@ -280,10 +280,10 @@ async fn request(
                     )
                     .await
                     .map_err(ServerError::DBError)?;
-                quests[i] = first_int(&mut res).await?;
+                quests[i] = first_int(res).await?;
             }
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO TAVERN (quest1, quest2, quest3)
                     VALUES (?1, ?2, ?3) returning ID",
@@ -291,18 +291,18 @@ async fn request(
                 )
                 .await
                 .map_err(ServerError::DBError)?;
-            let tavern_id = first_int(&mut res).await?;
+            let tavern_id = first_int(res).await?;
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO BAG (pos1) VALUES (NULL) returning ID",
                     params!(),
                 )
                 .await
                 .map_err(ServerError::DBError)?;
-            let bag_id = first_int(&mut res).await?;
+            let bag_id = first_int(res).await?;
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO Attributes
                      ( Strength, Dexterity, Intelligence, Stamina, Luck )
@@ -311,9 +311,9 @@ async fn request(
                 )
                 .await
                 .map_err(ServerError::DBError)?;
-            let attr_id = first_int(&mut res).await?;
+            let attr_id = first_int(res).await?;
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO Attributes
                     ( Strength, Dexterity, Intelligence, Stamina, Luck )
@@ -322,9 +322,9 @@ async fn request(
                 )
                 .await
                 .map_err(ServerError::DBError)?;
-            let attr_upgrades = first_int(&mut res).await?;
+            let attr_upgrades = first_int(res).await?;
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO PORTRAIT (Mouth, Hair, Brows, Eyes, Beards, \
                      Nose, Ears, Horns, extra) VALUES (?1, ?2, ?3, ?4, ?5, \
@@ -337,23 +337,33 @@ async fn request(
                 )
                 .await
                 .map_err(ServerError::DBError)?;
-            let portrait_id = first_int(&mut res).await?;
+            let portrait_id = first_int(res).await?;
 
-            let mut res = tx
+            let res = tx
                 .query(
                     "INSERT INTO Activity (typ) VALUES (0) RETURNING ID",
                     params!(),
                 )
                 .await
                 .map_err(ServerError::DBError)?;
-            let activity_id = first_int(&mut res).await?;
+            let activity_id = first_int(res).await?;
 
-            tx
+            let res = tx
+                .query(
+                    "INSERT INTO Equipment (hat) VALUES (null) RETURNING ID",
+                    params!(),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let equip_id = first_int(res).await?;
+
+            let mut res = tx
                 .query(
                     "INSERT INTO Character
                     (Name, Class, Attributes, AttributesBought, LoginData,
-                    Tavern, Bag, Portrait, Gender, Race, Activity)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    Tavern, Bag, Portrait, Gender, Race, Activity, Equipment)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                RETURNING ID",
                     params!(
                         name,
                         class as i32 + 1,
@@ -365,11 +375,16 @@ async fn request(
                         portrait_id,
                         gender as i32 + 1,
                         race as i32,
-                        activity_id
+                        activity_id,
+                        equip_id
                     ),
                 )
                 .await
                 .map_err(ServerError::DBError)?;
+
+            let r = res.next().await.map_err(ServerError::DBError)?;
+            drop(r);
+            drop(res);
 
             tx.commit().await.map_err(ServerError::DBError)?;
 
@@ -383,51 +398,47 @@ async fn request(
             let full_hash = command_args.get_str(1, "password hash")?;
             let login_count = command_args.get_int(2, "login count")?;
 
-            todo!();
-            // let Ok(info) = sqlx::query!(
-            //     "SELECT character.id, pwhash, character.logindata FROM \
-            //      character LEFT JOIN logindata on logindata.id = \
-            //      character.logindata WHERE lower(name) = lower(?1)",
-            //     name
-            // )
-            // .fetch_one(&db)
-            // .await
-            // else {
-            //     return INTERNAL_ERR;
-            // };
+            let res = db
+                .query(
+                    "SELECT character.id, pwhash, character.logindata FROM
+                      character LEFT JOIN logindata on logindata.id =
+                      character.logindata WHERE lower(name) = lower(?1)",
+                    params!(name),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let info = first_row(res).await?;
 
-            // let correct_full_hash =
-            //     sha1_hash(&format!("{}{login_count}", info.pwhash));
-            // if correct_full_hash != full_hash {
-            //     return ServerError::WrongPassword.resp();
-            // }
+            let id = info.get(0).map_err(ServerError::DBError)?;
+            let pwhash = info.get_str(1).map_err(ServerError::DBError)?;
+            let logindata: i32 = info.get(2).map_err(ServerError::DBError)?;
 
-            // let session_id: String = (0..DEFAULT_SESSION_ID.len())
-            //     .map(|_| rng.alphanumeric())
-            //     .collect();
+            let correct_full_hash =
+                sha1_hash(&format!("{}{login_count}", pwhash));
+            if correct_full_hash != full_hash {
+                Err(ServerError::WrongPassword)?;
+            }
 
-            // let mut crypto_id = "0-".to_string();
-            // for _ in 2..DEFAULT_CRYPTO_ID.len() {
-            //     let rc = rng.alphabetic();
-            //     crypto_id.push(rc);
-            // }
+            let session_id: String = (0..DEFAULT_SESSION_ID.len())
+                .map(|_| rng.alphanumeric())
+                .collect();
 
-            // if sqlx::query!(
-            //     "UPDATE logindata
-            //     set sessionid = ?2, cryptoid = ?3
-            //     where id = ?1",
-            //     info.logindata,
-            //     session_id,
-            //     crypto_id
-            // )
-            // .execute(&db)
-            // .await
-            // .is_err()
-            // {
-            //     return INTERNAL_ERR;
-            // };
+            let mut crypto_id = "0-".to_string();
+            for _ in 2..DEFAULT_CRYPTO_ID.len() {
+                let rc = rng.alphabetic();
+                crypto_id.push(rc);
+            }
 
-            // player_poll(info.id, "accountlogin", &db, Default::default()).await
+            db.query(
+                "UPDATE logindata
+                SET sessionid = ?2, cryptoid = ?3
+                WHERE id = ?1",
+                params!(logindata, session_id, crypto_id),
+            )
+            .await
+            .map_err(ServerError::DBError)?;
+
+            player_poll(id, "accountlogin", &db, Default::default()).await
         }
         "AccountSetLanguage" => {
             // NONE
@@ -918,11 +929,11 @@ async fn request(
                 return Err(ServerError::InvalidName)?;
             }
 
-            let mut res = db
+            let res = db
                 .query("SELECT COUNT(*) FROM CHARACTER WHERE name = ?1", [name])
                 .await
                 .map_err(ServerError::DBError)?;
-            let count = first_int(&mut res).await?;
+            let count = first_int(res).await?;
 
             match count {
                 0 => ResponseBuilder::default()
@@ -2146,11 +2157,11 @@ fn get_row(input: Result<Option<Row>, libsql::Error>) -> Result<Row, Response> {
         .ok_or_else(|| ServerError::Internal)?)
 }
 
-async fn first_row(input: &mut Rows) -> Result<Row, Response> {
+async fn first_row(mut input: Rows) -> Result<Row, Response> {
     get_row(input.next().await)
 }
 
-async fn first_int(input: &mut Rows) -> Result<i64, Response> {
+async fn first_int(mut input: Rows) -> Result<i64, Response> {
     let row = get_row(input.next().await)?;
     let val = row.get_value(0).map_err(ServerError::DBError)?;
     Ok(*val.as_integer().ok_or_else(|| ServerError::Internal)?)
