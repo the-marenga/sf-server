@@ -1,4 +1,8 @@
-use actix_web::{HttpResponse, Responder};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use thiserror::Error;
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(unused)]
@@ -8,28 +12,49 @@ pub struct Request {
     c: u32,
 }
 
-pub enum Response {
+pub enum ServerResponse {
     Success,
     Data(String),
-    Error(Error),
 }
 
-pub enum Error {
+#[derive(Debug, Error)]
+pub enum ServerError {
+    #[error("name is not available")]
     InvalidName,
+    #[error("character exists")]
     CharacterExists,
+    #[error("bad request")]
     BadRequest,
-    UnknownRequest,
+    #[error("wrong pass")]
     WrongPassword,
+    #[error("command requires valid session")]
     InvalidAuth,
+    #[error("unknown request")]
+    UnknownRequest,
+    #[error("command missing argument: {0}")]
     MissingArgument(&'static str),
+    #[error("internal server error")]
     Internal,
+    #[error("need more gold")]
     NotEnoughMoney,
+    #[error("still busy")]
     StillBusy,
+    #[error("cannot do this right now2")]
+    NotRightNow2,
+    #[error("internal error")]
+    DBError(#[from] libsql::Error),
 }
 
-impl Error {
-    pub fn resp(self) -> Response {
-        Response::Error(self)
+impl From<ServerError> for Response {
+    fn from(error: ServerError) -> Response {
+        let status = StatusCode::OK;
+        match Response::builder()
+            .status(status)
+            .body(axum::body::Body::new(format!("error:{error}")))
+        {
+            Ok(resp) => resp,
+            Err(_) => status.into_response(),
+        }
     }
 }
 
@@ -75,46 +100,27 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn build(&mut self) -> Response {
+    pub fn build(&mut self) -> Result<Response, Response> {
         let mut a = String::new();
         std::mem::swap(&mut a, &mut self.resp);
-        Response::Data(a)
+        Ok(ServerResponse::Data(a).into())
     }
 }
 
-impl Error {
-    pub fn error_str(&self) -> String {
-        match self {
-            Error::InvalidName => "name is not available",
-            Error::CharacterExists => "character exists",
-            Error::BadRequest => "bad request",
-            Error::WrongPassword => "wrong pass",
-            Error::InvalidAuth => "command requires valid session",
-            Error::UnknownRequest => "unknown request",
-            Error::MissingArgument(name) => {
-                return format!("command missing argument: {name}")
-            }
-            Error::Internal => "internal server error",
-            Error::NotEnoughMoney => "need more gold",
-            Error::StillBusy => "still busy",
-        }
-        .to_string()
-    }
-}
+impl From<ServerResponse> for Response {
+    fn from(resp: ServerResponse) -> Response {
+        let status = StatusCode::OK;
 
-impl Responder for Response {
-    type Body = actix_web::body::BoxBody;
-
-    fn respond_to(
-        self,
-        _req: &actix_web::HttpRequest,
-    ) -> HttpResponse<Self::Body> {
-        let body = match self {
-            Response::Success => "Success:".to_string(),
-            Response::Data(d) => d,
-            Response::Error(e) => format!("error:{}", e.error_str()),
+        let body = match resp {
+            ServerResponse::Success => "Success:".to_string(),
+            ServerResponse::Data(data) => data,
         };
-
-        HttpResponse::Ok().body(body)
+        match Response::builder()
+            .status(status)
+            .body(axum::body::Body::new(body))
+        {
+            Ok(resp) => resp,
+            Err(_) => status.into_response(),
+        }
     }
 }
