@@ -154,9 +154,7 @@ async fn request(
         println!("Received: {command_name}: {}", command_args);
     }
     let command_args: Vec<_> = command_args.split('/').collect();
-
     let command_args = CommandArguments(command_args);
-
     let mut rng = fastrand::Rng::new();
 
     if player_id < 0
@@ -170,57 +168,55 @@ async fn request(
 
     match command_name {
         "PlayerSetFace" => {
-            todo!()
-            // let race = Race::from_i64(command_args.get_int(0, "race")?);
-            // let gender = command_args.get_int(1, "gender")?;
-            // let gender = Gender::from_i64(gender.saturating_sub(1));
-            // let portrait_str = command_args.get_str(2, "portrait")?;
-            // let portrait = Portrait::parse(portrait_str);
-            // let Ok(mut tx) = db.begin().await else {
-            //     return Err(ServerError::Internal);
-            // };
+            let race = Race::from_i64(command_args.get_int(0, "race")?)
+                .ok_or_else(|| ServerError::BadRequest)?;
+            let gender = command_args.get_int(1, "gender")?;
+            let gender = Gender::from_i64(gender.saturating_sub(1))
+                .ok_or_else(|| ServerError::BadRequest)?;
+            let portrait_str = command_args.get_str(2, "portrait")?;
+            let portrait = Portrait::parse(portrait_str)
+                .ok_or_else(|| ServerError::BadRequest)?;
 
-            // let Ok(portrait_id) = sqlx::query_scalar!(
-            //     "UPDATE CHARACTER SET gender = ?1, race = ?2 WHERE id = ?3 \
-            //      RETURNING portrait",
-            //     gender as i32 + 1,
-            //     race as i32,
-            //     player_id
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let tx = db.transaction().await.map_err(ServerError::DBError)?;
 
-            // if sqlx::query_scalar!(
-            //     "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, Eyes \
-            //      = ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = ?8, extra = \
-            //      ?9 WHERE ID = ?10",
-            //     portrait.mouth,
-            //     portrait.hair,
-            //     portrait.eyebrows,
-            //     portrait.eyes,
-            //     portrait.beard,
-            //     portrait.nose,
-            //     portrait.ears,
-            //     portrait.horns,
-            //     portrait.extra,
-            //     portrait_id
-            // )
-            // .execute(&mut *tx)
-            // .await
-            // .is_err()
-            // {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let res = tx
+                .query(
+                    "UPDATE CHARACTER SET gender = ?1, race = ?2, mushrooms = \
+                     mushrooms - 1 WHERE id = ?3 RETURNING portrait, mushrooms",
+                    params!(gender as i32 + 1, race as i32, player_id),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
+            let row = first_row(res).await?;
 
-            // match tx.commit().await {
-            //     Err(_) => INTERNAL_ERR,
-            //     Ok(_) => Response::Success,
-            // }
+            let portrait_id: i32 = row.get(0).map_err(ServerError::DBError)?;
+            let mushrooms: i32 = row.get(1).map_err(ServerError::DBError)?;
+            if mushrooms < 0 {
+                tx.rollback().await.map_err(ServerError::DBError)?;
+                return Err(ServerError::NotEnoughMoney.into());
+            }
+
+            let mut res = db.query(
+                "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, Eyes \
+                 = ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = ?8, extra = \
+                 ?9 WHERE ID = ?10",
+                params!(
+                    portrait.mouth, portrait.hair, portrait.eyebrows,
+                    portrait.eyes, portrait.beard, portrait.nose,
+                    portrait.ears, portrait.horns, portrait.extra, portrait_id
+                ),
+            )
+            .await
+            .map_err(ServerError::DBError)?;
+
+            drop(row);
+            let row = res.next().await.map_err(ServerError::DBError)?;
+            drop(res);
+            drop(row);
+
+            tx.commit().await.map_err(ServerError::DBError)?;
+
+            Ok(ServerResponse::Success.into())
         }
         "AccountCreate" => {
             let name = command_args.get_str(0, "name")?;
@@ -2130,7 +2126,7 @@ async fn player_poll(
     resp.add_val(0);
 
     resp.add_key("expeditionevent");
-    resp.add_val(in_seconds(- 60 * 60));
+    resp.add_val(in_seconds(-60 * 60));
     resp.add_val(in_seconds(60 * 60));
     resp.add_val(1);
     resp.add_val(in_seconds(60 * 60));
