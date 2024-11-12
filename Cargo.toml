@@ -8,6 +8,7 @@ aho-corasick = "1.1.2"
 async-once-cell = "0.5.4"
 axum = "0.7.7"
 base64 = "0.21.7"
+clap = { version = "4.5.20", features = ["derive"] }
 fastrand = "2.0.1"
 libaes = "0.7.0"
 libsql = "0.6.0"

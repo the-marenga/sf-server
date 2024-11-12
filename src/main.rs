@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    num::NonZeroU16,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -36,7 +35,6 @@ async fn main() {
 
     let app = Router::new()
         .route("/req.php", get(request_wrapper))
-        .route("/*key", get(request_wrapper))
         .layer(cors);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -431,7 +429,8 @@ async fn request(
             let rank = match rank {
                 1.. => rank,
                 _ => {
-                    0
+                    // TODO:
+                    1
                     // let name = name?;
                     // let res = db
                     //     .query(
@@ -958,15 +957,14 @@ async fn request(
             if name != "server" {
                 todo!()
             }
-            let mut args = command_args.get_str(1, "args")?.split(' ');
-            let cmd = args.next().get("command name")?;
-            match cmd {
-                "level" => {
-                    let level: i16 = args
-                        .next()
-                        .get("command level")?
-                        .parse()
-                        .map_err(|_| ServerError::BadRequest)?;
+            let args: Vec<_> =
+                command_args.get_str(1, "args")?.split(' ').collect();
+
+            let res = CheatCmd::try_parse_from(&args)
+                .map_err(|_| ServerError::BadRequest)?;
+
+            match res.command {
+                Command::Level { level } => {
                     if level < 1 {
                         return Err(ServerError::BadRequest);
                     }
@@ -976,25 +974,14 @@ async fn request(
                     )
                     .await?;
                 }
-                "class" => {
-                    let class: i32 = args
-                        .next()
-                        .get("command class")?
-                        .parse()
-                        .ok()
-                        .and_then(|a: i32| a.checked_sub(1))
-                        .ok_or_else(|| ServerError::BadRequest)?;
-                    let class = Class::from_i32(class).get("command class")?;
-
+                Command::Class { class } => {
+                    let class =
+                        Class::from_i16(class - 1).get("command class")?;
                     db.query(
                         "UPDATE character set class = ?1 WHERE id = ?2",
                         params!(class as i32 + 1, player_id),
                     )
                     .await?;
-                }
-                _ => {
-                    // TODO: print help?
-                    return Err(ServerError::UnknownRequest);
                 }
             }
             Ok(player_poll(player_id, "", &db, Default::default()).await?)
@@ -2359,4 +2346,19 @@ async fn first_int(mut input: Rows) -> Result<i64, ServerError> {
     let row = get_row(input.next().await)?;
     let val = row.get_value(0)?;
     Ok(*val.as_integer().ok_or_else(|| ServerError::Internal)?)
+}
+
+use clap::{Parser, Subcommand};
+
+#[derive(Debug, Parser)]
+#[command(about, version, no_binary_name(true))]
+struct CheatCmd {
+    #[clap(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Level { level: i16 },
+    Class { class: i16 },
 }
