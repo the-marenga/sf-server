@@ -196,18 +196,20 @@ async fn request(
                 return Err(ServerError::NotEnoughMoney.into());
             }
 
-            let mut res = db.query(
-                "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, Eyes \
-                 = ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = ?8, extra = \
-                 ?9 WHERE ID = ?10",
-                params!(
-                    portrait.mouth, portrait.hair, portrait.eyebrows,
-                    portrait.eyes, portrait.beard, portrait.nose,
-                    portrait.ears, portrait.horns, portrait.extra, portrait_id
-                ),
-            )
-            .await
-            .map_err(ServerError::DBError)?;
+            let mut res = db
+                .query(
+                    "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, \
+                     Eyes = ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = \
+                     ?8, extra = ?9 WHERE ID = ?10",
+                    params!(
+                        portrait.mouth, portrait.hair, portrait.eyebrows,
+                        portrait.eyes, portrait.beard, portrait.nose,
+                        portrait.ears, portrait.horns, portrait.extra,
+                        portrait_id
+                    ),
+                )
+                .await
+                .map_err(ServerError::DBError)?;
 
             drop(row);
             let row = res.next().await.map_err(ServerError::DBError)?;
@@ -470,76 +472,72 @@ async fn request(
             .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
             .build(),
         "PlayerGetHallOfFame" => {
-            todo!();
+            let rank = command_args.get_int(0, "rank").unwrap_or_default();
+            let pre = command_args.get_int(2, "pre").unwrap_or_default();
+            let post = command_args.get_int(3, "post").unwrap_or_default();
+            let name = command_args.get_str(1, "name or rank");
 
-            // let rank = command_args.get_int(0, "rank").unwrap_or_default();
-            // let pre = command_args.get_int(2, "pre").unwrap_or_default();
-            // let post = command_args.get_int(3, "post").unwrap_or_default();
-            // let name = command_args.get_str(1, "name or rank");
+            let rank = match rank {
+                1.. => rank,
+                _ => {
+                    let name = name?;
+                    let res = db
+                        .query(
+                            "WITH selected_character AS (
+                                 SELECT honor, id FROM character WHERE name = \
+                             ?1
+                            )
+                             SELECT
+                                 (SELECT COUNT(*) FROM character WHERE honor > \
+                             (SELECT honor FROM selected_character)
+                                     OR (honor = (SELECT honor FROM \
+                             selected_character)
+                                         AND id <= (SELECT id FROM \
+                             selected_character))
+                                 ) AS rank",
+                            [name],
+                        )
+                        .await
+                        .map_err(ServerError::DBError)?;
+                    first_int(res).await?
+                }
+            };
 
-            // let rank = match rank {
-            //     1.. => rank,
-            //     _ => {
-            //         let name = name?;
-            //         let Ok(info) = sqlx::query!(
-            //             "SELECT honor, id from character where name = ?1", name
-            //         )
-            //         .fetch_one(&db)
-            //         .await
-            //         else {
-            //             return INTERNAL_ERR;
-            //         };
+            let offset = (rank - pre).max(1) - 1;
+            let limit = (pre + post).min(30);
 
-            //         let Ok(Some(rank)) = sqlx::query_scalar!(
-            //             "SELECT count(*) from character where honor > ?1 OR \
-            //              honor = ?1 AND id <= ?2",
-            //             info.honor,
-            //             info.id
-            //         )
-            //         .fetch_one(&db)
-            //         .await
-            //         else {
-            //             return INTERNAL_ERR;
-            //         };
-            //         rank
-            //     }
-            // };
+            let mut res = db
+                .query(
+                    "SELECT name, level, honor, class FROM CHARACTER
+                     ORDER BY honor desc, id asc  LIMIT ?2 OFFSET ?1",
+                    [offset, limit],
+                )
+                .await
+                .map_err(ServerError::DBError)?;
 
-            // let offset = (rank - pre).max(1) - 1;
-            // let limit = (pre + post).min(30);
+            let mut players = String::new();
+            let mut entry_idx = 0;
+            while let Some(row) =
+                res.next().await.map_err(ServerError::DBError)?
+            {
+                let player = format!(
+                    "{},{},{},{},{},{},{};",
+                    offset + entry_idx + 1,
+                    row.get_str(0).map_err(ServerError::DBError)?,
+                    "",
+                    row.get::<i32>(1).map_err(ServerError::DBError)?,
+                    row.get::<i32>(2).map_err(ServerError::DBError)?,
+                    row.get::<i32>(3).map_err(ServerError::DBError)?,
+                    "bg"
+                );
+                players.push_str(&player);
+                entry_idx += 1
+            }
 
-            // let Ok(results) = sqlx::query!(
-            //     "SELECT id, level, name, class, honor FROM CHARACTER ORDER BY \
-            //      honor desc, id OFFSET ?1
-            //      LIMIT ?2",
-            //     offset,
-            //     limit,
-            // )
-            // .fetch_all(&db)
-            // .await
-            // else {
-            //     return INTERNAL_ERR;
-            // };
-
-            // let mut players = String::new();
-            // for (pos, result) in results.into_iter().enumerate() {
-            //     let player = format!(
-            //         "{},{},{},{},{},{},{};",
-            //         offset + pos as i64 + 1,
-            //         &result.name,
-            //         "",
-            //         result.level,
-            //         result.honor,
-            //         result.class,
-            //         "bg"
-            //     );
-            //     players.push_str(&player);
-            // }
-
-            // ResponseBuilder::default()
-            //     .add_key("Ranklistplayer.r")
-            //     .add_str(&players)
-            //     .build()
+            ResponseBuilder::default()
+                .add_key("Ranklistplayer.r")
+                .add_str(&players)
+                .build()
         }
         "AccountDelete" => {
             todo!()
@@ -1512,9 +1510,9 @@ async fn player_poll(
     resp.add_val(res.get::<i64>(24)?); // 232 Quest1 Flavour2
     resp.add_val(res.get::<i64>(25)?); // 234 Quest3 Flavour2
 
-    resp.add_val(res.get::<i64>(26)?); // 235 quest 1 monster
-    resp.add_val(res.get::<i64>(27)?); // 236 quest 2 monster
-    resp.add_val(res.get::<i64>(28)?); // 237 quest 3 monster
+    resp.add_val(-res.get::<i64>(26)?); // 235 quest 1 monster
+    resp.add_val(-res.get::<i64>(27)?); // 236 quest 2 monster
+    resp.add_val(-res.get::<i64>(28)?); // 237 quest 3 monster
 
     resp.add_val(res.get::<i64>(29)?); // 238 quest 1 location
     resp.add_val(res.get::<i64>(30)?); // 239 quest 2 location
@@ -1549,17 +1547,13 @@ async fn player_poll(
     // Weapon shop
     resp.add_val(1708336503); // 287
     for _ in 0..6 {
-        for _ in 0..12 {
-            resp.add_val(0); // 288..=359
-        }
+        weapon.serialize_response(resp);
     }
 
     // Magic shop
     resp.add_val(1708336503); // 360
     for _ in 0..6 {
-        for _ in 0..12 {
-            resp.add_val(0); // 361..=432
-        }
+        weapon.serialize_response(resp);
     }
 
     resp.add_val(0); // 433
@@ -2136,7 +2130,7 @@ async fn player_poll(
     resp.add_val(0);
     resp.add_val(0);
     resp.add_val(0);
-    resp.add_str("a");
+    resp.add_str("0");
     resp.add_val(0);
 
     resp.add_key("mailinvoice");
