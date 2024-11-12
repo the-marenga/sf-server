@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    num::NonZeroU16,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -35,6 +36,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/req.php", get(request_wrapper))
+        .route("/*key", get(request_wrapper))
         .layer(cors);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -47,7 +49,7 @@ const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
 const DEFAULT_CRYPTO_ID: &str = "0-00000000000000";
 const DEFAULT_SESSION_ID: &str = "00000000000000000000000000000000";
 const DEFAULT_CRYPTO_KEY: &str = "[_/$VV&*Qg&)r?~g";
-const SERVER_VERSION: u32 = 2004;
+const SERVER_VERSION: u32 = 2007;
 
 pub async fn get_db() -> Result<libsql::Connection, ServerError> {
     use async_once_cell::OnceCell;
@@ -63,6 +65,9 @@ pub async fn connect_init_db() -> Result<libsql::Connection, ServerError> {
         .build()
         .await?
         .connect()?;
+
+    // db.execute_batch(include_str!("../db.sql")).await?;
+
     Ok(db)
 }
 
@@ -417,6 +422,80 @@ async fn request(
             .add_key("helpshiftauthtoken")
             .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
             .build(),
+        "GroupGetHallOfFame" => {
+            let rank = command_args.get_int(0, "rank").unwrap_or_default();
+            let pre = command_args.get_int(2, "pre").unwrap_or_default();
+            let post = command_args.get_int(3, "post").unwrap_or_default();
+            let name = command_args.get_str(1, "name or rank");
+
+            let rank = match rank {
+                1.. => rank,
+                _ => {
+                    0
+                    // let name = name?;
+                    // let res = db
+                    //     .query(
+                    //         "WITH selected_character AS (
+                    //              SELECT honor, id FROM character WHERE name = \
+                    //          ?1
+                    //         )
+                    //          SELECT
+                    //              (SELECT COUNT(*) FROM character WHERE honor > \
+                    //          (SELECT honor FROM selected_character)
+                    //                  OR (honor = (SELECT honor FROM \
+                    //          selected_character)
+                    //                      AND id <= (SELECT id FROM \
+                    //          selected_character))
+                    //              ) AS rank",
+                    //         [name],
+                    //     )
+                    //     .await?;
+                    // first_int(res).await?
+                }
+            };
+
+            let offset = (rank - pre).max(1) - 1;
+            let limit = (pre + post).min(30);
+
+            let mut res = db
+                .query(
+                    "SELECT
+                        g.name,
+                        COALESCE(c.name, 'None') as leader,
+                        (SELECT count(*) FROM guildmember WHERE guild = g.id),
+                        g.honor,
+                        g.attacking
+                        FROM GUILD as g
+                        LEFT JOIN guildmember as gm on gm.guild = g.id
+                        LEFT JOIN character as c on gm.id = c.guild
+                        WHERE RANK = 3
+                        ORDER BY g.honor desc, g.id asc
+                        LIMIT ?2 OFFSET ?1",
+                    [offset, limit],
+                )
+                .await?;
+
+            let mut players = String::new();
+            let mut entry_idx = 0;
+            while let Some(row) = res.next().await? {
+                let player = format!(
+                    "{},{},{},{},{},{};",
+                    entry_idx,
+                    row.get_str(0)?,
+                    row.get_str(1)?,
+                    row.get::<i32>(2)?,
+                    row.get::<i32>(3)?,
+                    row.get::<Option<i32>>(4)?.map_or(0, |_| 1),
+                );
+                players.push_str(&player);
+                entry_idx += 1
+            }
+
+            ResponseBuilder::default()
+                .add_key("ranklistgroup.r")
+                .add_str(&players)
+                .build()
+        }
         "PlayerGetHallOfFame" => {
             let rank = command_args.get_int(0, "rank").unwrap_or_default();
             let pre = command_args.get_int(2, "pre").unwrap_or_default();
@@ -482,6 +561,8 @@ async fn request(
                 .build()
         }
         "AccountDelete" => {
+            return Ok(ServerResponse::Success);
+
             todo!()
             // let Some(name) = command_args.get_str(0) else {
             //     return ServerError::MissingArgument("name").resp();
@@ -872,6 +953,52 @@ async fn request(
             Ok(player_poll(player_id, "poll", &db, Default::default()).await?)
         }
         "UserSettingsUpdate" => Ok(ServerResponse::Success),
+        "PlayerWhisper" => {
+            let name = command_args.get_str(0, "name")?.to_lowercase();
+            if name != "server" {
+                todo!()
+            }
+            let mut args = command_args.get_str(1, "args")?.split(' ');
+            let cmd = args.next().get("command name")?;
+            match cmd {
+                "level" => {
+                    let level: i16 = args
+                        .next()
+                        .get("command level")?
+                        .parse()
+                        .map_err(|_| ServerError::BadRequest)?;
+                    if level < 1 {
+                        return Err(ServerError::BadRequest);
+                    }
+                    db.query(
+                        "UPDATE character set level = ?1 WHERE id = ?2",
+                        params!(level, player_id),
+                    )
+                    .await?;
+                }
+                "class" => {
+                    let class: i32 = args
+                        .next()
+                        .get("command class")?
+                        .parse()
+                        .ok()
+                        .and_then(|a: i32| a.checked_sub(1))
+                        .ok_or_else(|| ServerError::BadRequest)?;
+                    let class = Class::from_i32(class).get("command class")?;
+
+                    db.query(
+                        "UPDATE character set class = ?1 WHERE id = ?2",
+                        params!(class as i32 + 1, player_id),
+                    )
+                    .await?;
+                }
+                _ => {
+                    // TODO: print help?
+                    return Err(ServerError::UnknownRequest);
+                }
+            }
+            Ok(player_poll(player_id, "", &db, Default::default()).await?)
+        }
         "AccountCheck" => {
             let name = command_args.get_str(0, "name")?;
 
