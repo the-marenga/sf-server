@@ -16,7 +16,7 @@ use sf_api::{
     command::AttributeType,
     gamestate::{
         character::{Class, Gender, Race},
-        items::Enchantment,
+        items::{Enchantment, EquipmentSlot},
     },
 };
 use strum::EnumCount;
@@ -957,11 +957,10 @@ async fn request(
             if name != "server" {
                 todo!()
             }
-            let args: Vec<_> =
-                command_args.get_str(1, "args")?.split(' ').collect();
-
-            let res = CheatCmd::try_parse_from(&args)
-                .map_err(|_| ServerError::BadRequest)?;
+            let res = CheatCmd::try_parse_from(
+                command_args.get_str(1, "args")?.split(' '),
+            )
+            .map_err(|_| ServerError::BadRequest)?;
 
             match res.command {
                 Command::Level { level } => {
@@ -1571,44 +1570,25 @@ async fn player_poll(
     resp.add_val(res.get::<i64>(19)?); // Busy until
 
     // Equipment
-    for _ in 0..10 {
-        for _ in 0..12 {
-            resp.add_val(0); // 48..=167
-        }
+    for slot in [
+        EquipmentSlot::Hat,
+        EquipmentSlot::BreastPlate,
+        EquipmentSlot::Gloves,
+        EquipmentSlot::FootWear,
+        EquipmentSlot::Amulet,
+        EquipmentSlot::Belt,
+        EquipmentSlot::Ring,
+        EquipmentSlot::Talisman,
+        EquipmentSlot::Weapon,
+        EquipmentSlot::Shield,
+    ] {
+        resp.add_dyn_item(format!("{slot:?}").to_lowercase());
     }
-
-    // let weapon = RawItem {
-    //     item_typ: RawItemTyp::Weapon,
-    //     enchantment: None,
-    //     gem_val: None,
-    //     sub_ident: None,
-    //     class: Some(MainClass::Mage),
-    //     modelid: 7,
-    //     effect_1: 100,
-    //     effect_2: 200,
-    //     atrs: AtrEffect::Simple([
-    //         Some(AtrTuple {
-    //             atr_typ: AtrTyp::Intelligence,
-    //             atr_val: 50,
-    //         }),
-    //         None,
-    //         None,
-    //     ]),
-    //     silver: 100,
-    //     mushrooms: 0,
-    //     gem_pwr: 0,
-    // };
-
-    let str = std::fs::read_to_string("weapon.json").unwrap();
-    let weapon: RawItem = serde_json::from_str(&str).unwrap();
-    weapon.serialize_response(resp);
-
-    // Inventory bag
-    for _ in 0..4 {
-        for _ in 0..12 {
-            resp.add_val(0); // 168..=227
-        }
-    }
+    resp.add_dyn_item("inventory1");
+    resp.add_dyn_item("inventory2");
+    resp.add_dyn_item("inventory3");
+    resp.add_dyn_item("inventory4");
+    resp.add_dyn_item("inventory5");
 
     resp.add_val(in_seconds(60 * 60)); // 228
 
@@ -1661,13 +1641,13 @@ async fn player_poll(
     // Weapon shop
     resp.add_val(1708336503); // 287
     for _ in 0..6 {
-        weapon.serialize_response(resp);
+        resp.add_dyn_item("weapon");
     }
 
     // Magic shop
     resp.add_val(1708336503); // 360
     for _ in 0..6 {
-        weapon.serialize_response(resp);
+        resp.add_dyn_item("weapon");
     }
 
     resp.add_val(0); // 433

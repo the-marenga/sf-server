@@ -4,6 +4,8 @@ use axum::{
 };
 use thiserror::Error;
 
+use crate::RawItem;
+
 #[derive(Debug, serde::Deserialize)]
 #[allow(unused)]
 pub struct Request {
@@ -65,6 +67,29 @@ pub struct ResponseBuilder {
 }
 
 impl ResponseBuilder {
+    pub fn add_dyn_item(
+        &mut self,
+        name: impl AsRef<str>,
+    ) -> &mut ResponseBuilder {
+        for _ in 0..12 {
+            self.add_val(0);
+        }
+        return self;
+
+        let path = format!("items/{}.json", name.as_ref());
+        let Some(weapon) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|a| serde_json::from_str::<RawItem>(&a).ok())
+        else {
+            for _ in 0..12 {
+                self.add_val(0);
+            }
+            return self;
+        };
+        weapon.serialize_response(self);
+        self
+    }
+
     pub fn add_key(&mut self, key: &str) -> &mut ResponseBuilder {
         if !self.resp.is_empty() {
             self.resp.push('&')
