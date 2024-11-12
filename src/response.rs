@@ -100,10 +100,10 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn build<T>(&mut self) -> Result<Response, T> {
+    pub fn build<T>(&mut self) -> Result<ServerResponse, T> {
         let mut a = String::new();
         std::mem::swap(&mut a, &mut self.resp);
-        Ok(ServerResponse::Data(a).into())
+        Ok(ServerResponse::Data(a))
     }
 }
 

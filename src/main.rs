@@ -33,7 +33,9 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST])
         .allow_origin(tower_http::cors::Any);
 
-    let app = Router::new().route("/req.php", get(request)).layer(cors);
+    let app = Router::new()
+        .route("/req.php", get(request_wrapper))
+        .layer(cors);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -91,12 +93,28 @@ impl<'a> CommandArguments<'a> {
     }
 }
 
+async fn request_wrapper(
+    req: Query<HashMap<String, String>>,
+) -> Result<Response, Response> {
+    // Rust can infer simple `?` conversions, but the `request()` function
+    // exceeds that limit. This is why we manually map this here
+    request(req).await.map_err(|a| a.into()).map(|a| a.into())
+}
+
+pub trait OptionGet<V> {
+    fn get(self, name: &'static str) -> Result<V, ServerError>;
+}
+
+impl<T> OptionGet<T> for Option<T> {
+    fn get(self, name: &'static str) -> Result<T, ServerError> {
+        self.ok_or_else(|| ServerError::MissingArgument(name))
+    }
+}
+
 async fn request(
     Query(req_params): Query<HashMap<String, String>>,
-) -> Result<Response, Response> {
-    let request = req_params
-        .get("req")
-        .ok_or_else(|| ServerError::BadRequest)?;
+) -> Result<ServerResponse, ServerError> {
+    let request = req_params.get("req").get("request parameter")?;
     let db = get_db().await?;
 
     if request.len() < DEFAULT_CRYPTO_ID.len() + 5 {
@@ -121,16 +139,14 @@ async fn request(
                  WHERE cryptoid = ?1",
                     [crypto_id],
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
 
-            let row = res.next().await.map_err(ServerError::DBError)?;
+            let row = res.next().await?;
 
             match row {
                 Some(row) => {
-                    let id = row.get(0).map_err(ServerError::DBError)?;
-                    let cryptokey =
-                        row.get_str(1).map_err(ServerError::DBError)?;
+                    let id = row.get(0)?;
+                    let cryptokey = row.get_str(1)?;
                     (id, cryptokey.to_string())
                 }
                 None => Err(ServerError::InvalidAuth)?,
@@ -167,76 +183,23 @@ async fn request(
     }
 
     match command_name {
-        "PlayerSetFace" => {
-            let race = Race::from_i64(command_args.get_int(0, "race")?)
-                .ok_or_else(|| ServerError::BadRequest)?;
-            let gender = command_args.get_int(1, "gender")?;
-            let gender = Gender::from_i64(gender.saturating_sub(1))
-                .ok_or_else(|| ServerError::BadRequest)?;
-            let portrait_str = command_args.get_str(2, "portrait")?;
-            let portrait = Portrait::parse(portrait_str)
-                .ok_or_else(|| ServerError::BadRequest)?;
-
-            let tx = db.transaction().await.map_err(ServerError::DBError)?;
-
-            let res = tx
-                .query(
-                    "UPDATE CHARACTER SET gender = ?1, race = ?2, mushrooms = \
-                     mushrooms - 1 WHERE id = ?3 RETURNING portrait, mushrooms",
-                    params!(gender as i32 + 1, race as i32, player_id),
-                )
-                .await
-                .map_err(ServerError::DBError)?;
-            let row = first_row(res).await?;
-
-            let portrait_id: i32 = row.get(0).map_err(ServerError::DBError)?;
-            let mushrooms: i32 = row.get(1).map_err(ServerError::DBError)?;
-            if mushrooms < 0 {
-                tx.rollback().await.map_err(ServerError::DBError)?;
-                return Err(ServerError::NotEnoughMoney.into());
-            }
-
-            let mut res = db
-                .query(
-                    "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, \
-                     Eyes = ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = \
-                     ?8, extra = ?9 WHERE ID = ?10",
-                    params!(
-                        portrait.mouth, portrait.hair, portrait.eyebrows,
-                        portrait.eyes, portrait.beard, portrait.nose,
-                        portrait.ears, portrait.horns, portrait.extra,
-                        portrait_id
-                    ),
-                )
-                .await
-                .map_err(ServerError::DBError)?;
-
-            drop(row);
-            let row = res.next().await.map_err(ServerError::DBError)?;
-            drop(res);
-            drop(row);
-
-            tx.commit().await.map_err(ServerError::DBError)?;
-
-            Ok(ServerResponse::Success.into())
-        }
+        "PlayerSetFace" => player_set_face(&command_args, &db, player_id).await,
         "AccountCreate" => {
             let name = command_args.get_str(0, "name")?;
             let password = command_args.get_str(1, "password")?;
             let mail = command_args.get_str(2, "mail")?;
             let gender = command_args.get_int(3, "gender")?;
-            let gender = Gender::from_i64(gender.saturating_sub(1))
-                .ok_or_else(|| ServerError::BadRequest)?;
-            let race = Race::from_i64(command_args.get_int(4, "race")?)
-                .ok_or_else(|| ServerError::BadRequest)?;
+            let gender =
+                Gender::from_i64(gender.saturating_sub(1)).get("gender")?;
+            let race =
+                Race::from_i64(command_args.get_int(4, "race")?).get("race")?;
 
             let class = command_args.get_int(5, "class")?;
-            let class = Class::from_i64(class.saturating_sub(1))
-                .ok_or_else(|| ServerError::BadRequest)?;
+            let class =
+                Class::from_i64(class.saturating_sub(1)).get("class")?;
 
             let portrait_str = command_args.get_str(6, "portrait")?;
-            let portrait = Portrait::parse(portrait_str)
-                .ok_or_else(|| ServerError::BadRequest)?;
+            let portrait = Portrait::parse(portrait_str).get("portrait")?;
 
             if is_invalid_name(name) {
                 Err(ServerError::InvalidName)?;
@@ -259,7 +222,7 @@ async fn request(
                 .map(|_| rng.alphanumeric())
                 .collect();
 
-            let tx = db.transaction().await.map_err(ServerError::DBError)?;
+            let tx = db.transaction().await?;
 
             let res = tx
                 .query(
@@ -271,8 +234,7 @@ async fn request(
                         crypto_key
                     ),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
 
             let login_id = first_int(res).await?;
 
@@ -286,8 +248,7 @@ async fn request(
                         VALUES (?1, ?2, ?3, ?4, ?5, ?6) returning ID",
                         [139, 1, 60, 100, 100, 1],
                     )
-                    .await
-                    .map_err(ServerError::DBError)?;
+                    .await?;
                 quests[i] = first_int(res).await?;
             }
 
@@ -297,8 +258,7 @@ async fn request(
                     VALUES (?1, ?2, ?3) returning ID",
                     quests,
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let tavern_id = first_int(res).await?;
 
             let res = tx
@@ -306,8 +266,7 @@ async fn request(
                     "INSERT INTO BAG (pos1) VALUES (NULL) returning ID",
                     params!(),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let bag_id = first_int(res).await?;
 
             let res = tx
@@ -317,8 +276,7 @@ async fn request(
                      VALUES (?1, ?2, ?3, ?4, ?5) returning ID",
                     [3, 6, 8, 2, 4],
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let attr_id = first_int(res).await?;
 
             let res = tx
@@ -328,8 +286,7 @@ async fn request(
                     VALUES (?1, ?2, ?3, ?4, ?5) returning ID",
                     [0, 0, 0, 0, 0],
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let attr_upgrades = first_int(res).await?;
 
             let res = tx
@@ -343,8 +300,7 @@ async fn request(
                         portrait.ears, portrait.horns, portrait.extra
                     ),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let portrait_id = first_int(res).await?;
 
             let res = tx
@@ -352,8 +308,7 @@ async fn request(
                     "INSERT INTO Activity (typ) VALUES (0) RETURNING ID",
                     params!(),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let activity_id = first_int(res).await?;
 
             let res = tx
@@ -361,8 +316,7 @@ async fn request(
                     "INSERT INTO Equipment (hat) VALUES (null) RETURNING ID",
                     params!(),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let equip_id = first_int(res).await?;
 
             let mut res = tx
@@ -387,14 +341,13 @@ async fn request(
                         equip_id
                     ),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
 
-            let r = res.next().await.map_err(ServerError::DBError)?;
+            let r = res.next().await?;
             drop(r);
             drop(res);
 
-            tx.commit().await.map_err(ServerError::DBError)?;
+            tx.commit().await?;
 
             ResponseBuilder::default()
                 .add_key("tracking.s")
@@ -413,13 +366,12 @@ async fn request(
                       character.logindata WHERE lower(name) = lower(?1)",
                     params!(name),
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let info = first_row(res).await?;
 
-            let id = info.get(0).map_err(ServerError::DBError)?;
-            let pwhash = info.get_str(1).map_err(ServerError::DBError)?;
-            let logindata: i32 = info.get(2).map_err(ServerError::DBError)?;
+            let id = info.get(0)?;
+            let pwhash = info.get_str(1)?;
+            let logindata: i32 = info.get(2)?;
 
             let correct_full_hash =
                 sha1_hash(&format!("{}{login_count}", pwhash));
@@ -443,17 +395,12 @@ async fn request(
                 WHERE id = ?1",
                 params!(logindata, session_id, crypto_id),
             )
-            .await
-            .map_err(ServerError::DBError)?;
-
-            Ok(
-                player_poll(id, "accountlogin", &db, Default::default())
-                    .await?,
-            )
+            .await?;
+            player_poll(id, "accountlogin", &db, Default::default()).await
         }
         "AccountSetLanguage" => {
             // NONE
-            Ok(ServerResponse::Success.into())
+            Ok(ServerResponse::Success)
         }
         "PlayerSetDescription" => {
             let description = command_args.get_str(0, "description")?;
@@ -462,8 +409,7 @@ async fn request(
                 "UPDATE Character SET description = ?1 WHERE id = ?2",
                 params!(&description, player_id),
             )
-            .await
-            .map_err(ServerError::DBError)?;
+            .await?;
 
             Ok(player_poll(player_id, "", &db, Default::default()).await?)
         }
@@ -497,8 +443,7 @@ async fn request(
                                  ) AS rank",
                             [name],
                         )
-                        .await
-                        .map_err(ServerError::DBError)?;
+                        .await?;
                     first_int(res).await?
                 }
             };
@@ -512,22 +457,19 @@ async fn request(
                      ORDER BY honor desc, id asc  LIMIT ?2 OFFSET ?1",
                     [offset, limit],
                 )
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
 
             let mut players = String::new();
             let mut entry_idx = 0;
-            while let Some(row) =
-                res.next().await.map_err(ServerError::DBError)?
-            {
+            while let Some(row) = res.next().await? {
                 let player = format!(
                     "{},{},{},{},{},{},{};",
                     offset + entry_idx + 1,
-                    row.get_str(0).map_err(ServerError::DBError)?,
+                    row.get_str(0)?,
                     "",
-                    row.get::<i32>(1).map_err(ServerError::DBError)?,
-                    row.get::<i32>(2).map_err(ServerError::DBError)?,
-                    row.get::<i32>(3).map_err(ServerError::DBError)?,
+                    row.get::<i32>(1)?,
+                    row.get::<i32>(2)?,
+                    row.get::<i32>(3)?,
                     "bg"
                 );
                 players.push_str(&player);
@@ -600,67 +542,72 @@ async fn request(
                 Err(ServerError::BadRequest)?;
             }
 
-            todo!()
+            let tx = db.transaction().await?;
 
-            // let Ok(mut tx) = db.begin().await else {
-            //     return Err(ServerError::Internal);
-            // };
+            let res = tx
+                .query(
+                    "SELECT
+                typ,
+                mount,
+                mountend,
 
-            // let Ok(info) = sqlx::query!(
-            //     "SELECT mount, mountend, activity.id as activityid, typ, \
-            //      subtyp, BusyUntil, q1.length as ql1, q2.Length as ql2, \
-            //      q3.length as ql3, tavern.Quest1 as q1id, tavern.Quest2 as \
-            //      q2id, tavern.Quest3 as q3id FROM character LEFT JOIN \
-            //      activity ON activity.id = character.activity LEFT JOIN \
-            //      TAVERN on character.tavern = tavern.id LEFT JOIN Quest as q1 \
-            //      on q1.id = tavern.Quest1 LEFT JOIN Quest as q2 on q2.id = \
-            //      tavern.Quest2 LEFT JOIN Quest as q3 on q3.id = tavern.Quest3 \
-            //      WHERE character.id = ?1",
-            //     player_id
-            // )
-            // .fetch_one(&mut *tx)
-            // .await
-            // else {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+                q1.length as ql1,
+                q2.Length as ql2,
+                q3.length as ql3,
 
-            // if info.typ != 0 {
-            //     return ServerError::StillBusy.resp();
-            // }
+                activity.id as activityid
 
-            // let mut mount_end = info.mountend;
-            // let mut mount = info.mount;
-            // let mount_effect = effective_mount(&mut mount_end, &mut mount);
+                FROM character LEFT JOIN activity ON activity.id = \
+                     character.activity LEFT JOIN TAVERN on character.tavern \
+                     = tavern.id LEFT JOIN Quest as q1 on q1.id = \
+                     tavern.Quest1 LEFT JOIN Quest as q2 on q2.id = \
+                     tavern.Quest2 LEFT JOIN Quest as q3 on q3.id = \
+                     tavern.Quest3 WHERE character.id = ?1",
+                    [player_id],
+                )
+                .await?;
 
-            // let quest_length = match quest {
-            //     1 => info.ql1,
-            //     2 => info.ql2,
-            //     _ => info.ql3,
-            // } as f32
-            //     * mount_effect;
+            let row = first_row(res).await?;
+            let typ: i32 = row.get(0)?;
+            if typ != 0 {
+                return Err(ServerError::StillBusy);
+            }
 
-            // if sqlx::query!(
-            //     "UPDATE activity SET TYP = 1, SUBTYP = ?2, BUSYUNTIL = ?3, \
-            //      STARTED = CURRENT_TIMESTAMP WHERE id = ?1",
-            //     info.activityid,
-            //     quest as i32,
-            //     Local::now().naive_local()
-            //         + Duration::from_secs(quest_length as u64),
-            // )
-            // .execute(&mut *tx)
-            // .await
-            // .is_err()
-            // {
-            //     _ = tx.rollback().await;
-            //     return INTERNAL_ERR;
-            // };
+            let mut mount = row.get(1)?;
+            let mut mount_end = row.get(2)?;
+            let mount_effect = effective_mount(&mut mount_end, &mut mount);
 
-            // if tx.commit().await.is_err() {
-            //     return INTERNAL_ERR;
-            // };
+            let quest_length = match quest {
+                1 => row.get::<i32>(3)?,
+                2 => row.get::<i32>(4)?,
+                _ => row.get::<i32>(5)?,
+            } as f32
+                * mount_effect;
 
-            // player_poll(player_id, "", &db, Default::default()).await
+            let activityid: i32 = row.get(6)?;
+
+            drop(row);
+
+            let mut res = tx
+                .query(
+                    "UPDATE activity SET TYP = 2, SUBTYP = ?2, BUSYUNTIL = \
+                     ?3, STARTED = CURRENT_TIMESTAMP WHERE id = ?1",
+                    params!(
+                        activityid,
+                        quest as i32,
+                        in_seconds(quest_length.trunc().max(0.0) as i64)
+                    ),
+                )
+                .await?;
+
+            let row = res.next().await?;
+
+            drop(row);
+            drop(res);
+
+            tx.commit().await?;
+
+            player_poll(player_id, "", &db, Default::default()).await
         }
         "PlayerAdventureFinished" => {
             todo!();
@@ -924,7 +871,7 @@ async fn request(
         "Poll" => {
             Ok(player_poll(player_id, "poll", &db, Default::default()).await?)
         }
-        "UserSettingsUpdate" => Ok(ServerResponse::Success.into()),
+        "UserSettingsUpdate" => Ok(ServerResponse::Success),
         "AccountCheck" => {
             let name = command_args.get_str(0, "name")?;
 
@@ -934,8 +881,7 @@ async fn request(
 
             let res = db
                 .query("SELECT COUNT(*) FROM CHARACTER WHERE name = ?1", [name])
-                .await
-                .map_err(ServerError::DBError)?;
+                .await?;
             let count = first_int(res).await?;
 
             match count {
@@ -946,7 +892,7 @@ async fn request(
                     .add_val(0)
                     .add_val(0)
                     .build(),
-                _ => Err(ServerError::CharacterExists.into()),
+                _ => Err(ServerError::CharacterExists),
             }
         }
         _ => {
@@ -954,6 +900,61 @@ async fn request(
             Err(ServerError::UnknownRequest)?
         }
     }
+}
+
+async fn player_set_face(
+    command_args: &CommandArguments<'_>,
+    db: &libsql::Connection,
+    player_id: i32,
+) -> Result<ServerResponse, ServerError> {
+    let race = Race::from_i64(command_args.get_int(0, "race")?)
+        .ok_or_else(|| ServerError::BadRequest)?;
+    let gender = command_args.get_int(1, "gender")?;
+    let gender = Gender::from_i64(gender.saturating_sub(1))
+        .ok_or_else(|| ServerError::BadRequest)?;
+    let portrait_str = command_args.get_str(2, "portrait")?;
+    let portrait =
+        Portrait::parse(portrait_str).ok_or_else(|| ServerError::BadRequest)?;
+
+    let tx = db.transaction().await?;
+
+    let res = tx
+        .query(
+            "UPDATE CHARACTER SET gender = ?1, race = ?2, mushrooms = \
+             mushrooms - 1 WHERE id = ?3 RETURNING portrait, mushrooms",
+            params!(gender as i32 + 1, race as i32, player_id),
+        )
+        .await?;
+    let row = first_row(res).await?;
+
+    let portrait_id: i32 = row.get(0)?;
+    let mushrooms: i32 = row.get(1)?;
+    if mushrooms < 0 {
+        tx.rollback().await?;
+        return Err(ServerError::NotEnoughMoney);
+    }
+
+    let mut res = db
+        .query(
+            "UPDATE PORTRAIT SET Mouth = ?1, Hair = ?2, Brows = ?3, Eyes = \
+             ?4, Beards = ?5, Nose = ?6, Ears = ?7, Horns = ?8, extra = ?9 \
+             WHERE ID = ?10",
+            params!(
+                portrait.mouth, portrait.hair, portrait.eyebrows,
+                portrait.eyes, portrait.beard, portrait.nose, portrait.ears,
+                portrait.horns, portrait.extra, portrait_id
+            ),
+        )
+        .await?;
+
+    drop(row);
+    let row = res.next().await?;
+    drop(res);
+    drop(row);
+
+    tx.commit().await?;
+
+    Ok(ServerResponse::Success)
 }
 
 pub(crate) const HASH_CONST: &str = "ahHoj2woo1eeChiech6ohphoB7Aithoh";
@@ -1217,7 +1218,7 @@ async fn player_poll(
     tracking: &str,
     db: &libsql::Connection,
     mut builder: ResponseBuilder,
-) -> Result<Response, ServerError> {
+) -> Result<ServerResponse, ServerError> {
     let resp = builder
         .add_key("serverversion")
         .add_val(SERVER_VERSION)
@@ -1411,8 +1412,7 @@ async fn player_poll(
         WHERE honor > ?1 OR honor = ?1 AND ID <= ?2",
             [honor, pid],
         )
-        .await
-        .map_err(ServerError::DBError)?;
+        .await?;
     let rank = first_int(hof_ref).await?;
     resp.add_val(rank); // Rank
 
@@ -1934,8 +1934,7 @@ async fn player_poll(
 
     let rank_ref = db
         .query("SELECT count(*) FROM character", params!())
-        .await
-        .map_err(ServerError::DBError)?;
+        .await?;
     let maxrank = first_int(rank_ref).await?;
 
     resp.add_key("maxrank");
@@ -2222,9 +2221,7 @@ fn decrypt_server_request(to_decrypt: &str, key: &str) -> String {
 fn get_row(
     input: Result<Option<Row>, libsql::Error>,
 ) -> Result<Row, ServerError> {
-    input
-        .map_err(ServerError::DBError)?
-        .ok_or_else(|| ServerError::Internal)
+    input?.ok_or_else(|| ServerError::Internal)
 }
 
 async fn first_row(mut input: Rows) -> Result<Row, ServerError> {
@@ -2233,6 +2230,6 @@ async fn first_row(mut input: Rows) -> Result<Row, ServerError> {
 
 async fn first_int(mut input: Rows) -> Result<i64, ServerError> {
     let row = get_row(input.next().await)?;
-    let val = row.get_value(0).map_err(ServerError::DBError)?;
+    let val = row.get_value(0)?;
     Ok(*val.as_integer().ok_or_else(|| ServerError::Internal)?)
 }
