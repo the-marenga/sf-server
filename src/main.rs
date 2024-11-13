@@ -371,7 +371,6 @@ async fn request(
                 )
                 .await?;
             let info = first_row(res).await?;
-
             let id = info.get(0)?;
             let pwhash = info.get_str(1)?;
             let logindata: i32 = info.get(2)?;
@@ -399,6 +398,7 @@ async fn request(
                 params!(logindata, session_id, crypto_id),
             )
             .await?;
+
             player_poll(id, "accountlogin", &db, Default::default()).await
         }
         "AccountSetLanguage" => {
@@ -560,6 +560,10 @@ async fn request(
                 .build()
         }
         "AccountDelete" => {
+            if true {
+                return Ok(ServerResponse::Success);
+            }
+
             let name = command_args.get_str(0, "account name")?;
             let full_hash = command_args.get_str(1, "pw hash")?;
             let login_count = command_args.get_int(2, "login count")?;
@@ -567,9 +571,10 @@ async fn request(
 
             let mut res = db
                 .query(
-                    "SELECT character.id, pwhash FROM character LEFT JOIN \
-                     logindata on logindata.id = character.logindata WHERE \
-                     lower(name) = lower(?1) and mail = ?2",
+                    "SELECT character.id, pwhash
+                    FROM character
+                    LEFT JOIN logindata on logindata.id = character.logindata
+                    WHERE lower(name) = lower(?1) and mail = ?2",
                     [name, mail],
                 )
                 .await?;
@@ -623,7 +628,8 @@ async fn request(
                 q2.Length as ql2,
                 q3.length as ql3,
 
-                activity.id as activityid
+                activity.id as activityid,
+                c.tavern as tavern_id
 
                 FROM character LEFT JOIN activity ON activity.id = \
                      character.activity LEFT JOIN TAVERN on character.tavern \
@@ -652,7 +658,8 @@ async fn request(
             } as f32
                 * mount_effect;
 
-            let activityid: i32 = row.get(6)?;
+            let activity_id: i32 = row.get(6)?;
+            let tavern_id: i32 = row.get(7)?;
 
             drop(row);
 
@@ -661,9 +668,9 @@ async fn request(
                     "UPDATE activity SET TYP = 2, SUBTYP = ?2, BUSYUNTIL = \
                      ?3, STARTED = CURRENT_TIMESTAMP WHERE id = ?1",
                     params!(
-                        activityid,
+                        activity_id,
                         quest as i32,
-                        in_seconds(quest_length.trunc().max(0.0) as i64)
+                        in_seconds(quest_length.ceil().max(0.0) as i64)
                     ),
                 )
                 .await?;
@@ -673,170 +680,245 @@ async fn request(
             drop(row);
             drop(res);
 
+            // TODO: We should keep track of how much we deduct here, so that
+            // we can accurately refund this on cancel
+            let mut res = tx
+                .query(
+                    "UPDATE tavern as t
+                 SET tfa = max(0, tfa - ?2)
+                 WHERE a.id = ?1",
+                    params!(tavern_id, quest_length),
+                )
+                .await?;
+            let row = res.next().await?;
+            drop(row);
+            drop(res);
+
             tx.commit().await?;
 
             player_poll(player_id, "", &db, Default::default()).await
         }
         "PlayerAdventureFinished" => {
-            todo!();
-            // let Ok(player) = sqlx::query!(
-            //     "SELECT mount, mountend, name, level, portrait.*, \
-            //      activity.typ, activity.subtyp, activity.busyuntil, \
-            //      activity.started,  character.gender, character.race, \
-            //      character.class, q1.XP as q1xp, q3.XP as q3xp, q2.XP as \
-            //      q2xp, q1.Silver as q1silver, q3.SILVER as q3silver, \
-            //      q2.SILVER as q2silver, q1.Mushrooms as q1mush,  q1.Monster \
-            //      as q1monster, q1.Location as q1location, q1.length as \
-            //      q1length, q1.item as q1item, q2.Mushrooms as q2mush, \
-            //      q2.Monster as q2monster, q2.Location as q2location, \
-            //      q2.length as q2length, q2.item as q2item, q3.Mushrooms as \
-            //      q3mush, q3.Monster as q3monster, q3.Location as q3location, \
-            //      q3.length as q3length, q3.item as q3item FROM CHARACTER LEFT \
-            //      JOIN PORTRAIT ON character.portrait = portrait.id LEFT JOIN \
-            //      tavern on tavern.id = character.tavern LEFT JOIN quest as q1 \
-            //      on tavern.quest1 = q1.id LEFT JOIN quest as q2 on \
-            //      tavern.quest2 = q2.id LEFT JOIN quest as q3 on tavern.quest2 \
-            //      = q3.id LEFT JOIN ACTIVITY ON activity.id = \
-            //      character.activity WHERE character.id = ?1",
-            //     player_id
-            // )
-            // .fetch_one(&db)
-            // .await
-            // else {
-            //     return INTERNAL_ERR;
-            // };
+            let tx = db.transaction().await?;
 
-            // if player.typ != 2 {
-            //     // We are not actually questing
-            //     return ServerError::StillBusy.resp();
-            // }
+            let res = tx
+                .query(
+                    "SELECT
+                        activity.typ,
+                        activity.busyuntil,
+                        activity.subtyp,
 
-            // if let Some(busy) = player.busyuntil {
-            //     if busy > Local::now().naive_local() {
-            //         // Quest is still going
-            //         return ServerError::StillBusy.resp();
-            //     }
-            // }
+                        q1.item as q1item,
+                        q1.length as q1length,
+                        q1.Location as q1location,
+                        q1.Monster as q1monster,
+                        q1.Mushrooms as q1mush,
+                        q1.Silver as q1silver,
+                        q1.XP as q1xp,
 
-            // let (xp, silver, mush, monster, location) = match player.subtyp {
-            //     1 => (
-            //         player.q1xp, player.q1silver, player.q1mush,
-            //         player.q1monster, player.q1location,
-            //     ),
-            //     2 => (
-            //         player.q2xp, player.q2silver, player.q2mush,
-            //         player.q2monster, player.q2location,
-            //     ),
-            //     _ => (
-            //         player.q3xp, player.q3silver, player.q3mush,
-            //         player.q3monster, player.q3location,
-            //     ),
-            // };
+                        q2.item as q2item,
+                        q2.length as q2length,
+                        q2.Location as q2location,
+                        q2.Monster as q2monster,
+                        q2.Mushrooms as q2mush,
+                        q2.SILVER as q2silver,
+                        q2.XP as q2xp,
 
-            // let honor_won = 10;
+                        q3.item as q3item,
+                        q3.length as q3length,
+                        q3.Location as q3location,
+                        q3.Monster as q3monster,
+                        q3.Mushrooms as q3mush,
+                        q3.SILVER as q3silver,
+                        q3.XP as q3xp,
 
-            // let mut resp = ResponseBuilder::default();
+                    level,--24
+                    name,
 
-            // resp.add_key("fightresult.battlereward");
-            // resp.add_val(true as u8);
-            // resp.add_val(0);
-            // resp.add_val(silver);
-            // resp.add_val(xp);
+                    portrait.mouth,
+                    portrait.hair,
+                    portrait.brows,
+                    portrait.eyes,
+                    portrait.beards,
+                    portrait.nose,
+                    portrait.ears,
+                    portrait.extra,
+                    portrait.horns,
 
-            // resp.add_val(mush);
-            // resp.add_val(honor_won);
-            // for _ in 0..15 {
-            //     resp.add_val(0);
-            // }
+                    character.race,
+                    character.gender,
+                    character.class,
 
-            // resp.add_key("fightheader.fighters");
-            // let monster_id = -monster;
-            // let monster_level = player.level;
+                    activity.id as activity_id
 
-            // let player_attributes = [1, 1, 1, 1, 1];
-            // let monster_attributes = [1, 1, 1, 1, 1];
-            // let monster_hp = 10_000;
-            // let player_hp = 10_000;
+                     FROM CHARACTER LEFT JOIN PORTRAIT ON character.portrait = \
+                     portrait.id LEFT JOIN tavern on tavern.id = \
+                     character.tavern LEFT JOIN quest as q1 on tavern.quest1 \
+                     = q1.id LEFT JOIN quest as q2 on tavern.quest2 = q2.id \
+                     LEFT JOIN quest as q3 on tavern.quest2 = q3.id LEFT JOIN \
+                     ACTIVITY ON activity.id = character.activity WHERE \
+                     character.id = ?1",
+                    [player_id],
+                )
+                .await?;
 
-            // resp.add_val(1);
-            // resp.add_val(0);
-            // resp.add_val(0);
+            let row = first_row(res).await?;
+            let typ: i32 = row.get(0)?;
+            if typ != 2 {
+                // We are not actually questing
+                return Err(ServerError::StillBusy);
+            }
+            let busyuntil: i64 = row.get(1)?;
 
-            // // Location
-            // resp.add_val(location);
+            if busyuntil > now() {
+                // Quest is still going
+                return Err(ServerError::StillBusy);
+            }
 
-            // resp.add_val(1);
-            // resp.add_val(player_id);
-            // resp.add_val(player.name);
-            // resp.add_val(player.level);
-            // for _ in 0..2 {
-            //     resp.add_val(player_hp);
-            // }
-            // for val in player_attributes {
-            //     resp.add_val(val);
-            // }
-            // // Portrait
-            // resp.add_val(player.mouth);
-            // resp.add_val(player.hair);
-            // resp.add_val(player.brows);
-            // resp.add_val(player.eyes);
-            // resp.add_val(player.beards);
-            // resp.add_val(player.nose);
-            // resp.add_val(player.ears);
-            // resp.add_val(player.extra);
-            // resp.add_val(player.horns);
+            let subtyp: i32 = row.get(2)?;
 
-            // resp.add_val(0); // special influencer portraits
+            let base_index = (7 * (subtyp - 1)) + 3;
+            let (_item, _length, location, monster, mush, silver, xp) = (
+                row.get::<Option<i64>>(base_index)?,
+                row.get::<i64>(base_index + 1)?,
+                row.get::<i64>(base_index + 2)?,
+                row.get::<i64>(base_index + 3)?,
+                row.get::<i64>(base_index + 4)?,
+                row.get::<i64>(base_index + 5)?,
+                row.get::<i64>(base_index + 6)?,
+            );
 
-            // resp.add_val(player.race);
-            // resp.add_val(player.gender); // Gender?
-            // resp.add_val(player.class);
+            let honor_won = 10;
 
-            // // Main weapon
-            // for _ in 0..12 {
-            //     resp.add_val(0);
-            // }
+            let mut resp = ResponseBuilder::default();
 
-            // // Sub weapon
-            // for _ in 0..12 {
-            //     resp.add_val(0);
-            // }
+            resp.add_key("fightresult.battlereward");
+            resp.add_val(true as u8); // won
+            resp.add_val(0);
+            resp.add_val(silver);
+            resp.add_val(xp);
 
-            // // Monster
-            // for _ in 0..2 {
-            //     resp.add_val(monster_id);
-            // }
-            // resp.add_val(monster_level);
-            // resp.add_val(monster_hp);
-            // resp.add_val(monster_hp);
-            // for attr in monster_attributes {
-            //     resp.add_val(attr);
-            // }
-            // resp.add_val(monster_id);
-            // for _ in 0..11 {
-            //     resp.add_val(0);
-            // }
-            // resp.add_val(3); // Class?
+            resp.add_val(mush);
+            resp.add_val(honor_won);
+            for _ in 0..15 {
+                resp.add_val(0);
+            }
 
-            // // Probably also items
-            // // This means just charging the portrait into the player
-            // resp.add_val(-1);
-            // for _ in 0..23 {
-            //     resp.add_val(0);
-            // }
+            resp.add_key("fightheader.fighters");
+            let monster_id = -monster;
+            let player_lvl: i32 = row.get(24)?;
 
-            // resp.add_key("fight.r");
-            // resp.add_str(&format!("{player_id},0,-1000"));
+            let player_attributes = [1, 1, 1, 1, 1];
+            let monster_attributes = [1, 1, 1, 1, 1];
+            let monster_hp = 10_000;
+            let player_hp = 10_000;
 
-            // // TODO: actually simulate fight
+            resp.add_val(1);
+            resp.add_val(0);
+            resp.add_val(0);
 
-            // resp.add_key("winnerid");
-            // resp.add_val(player_id);
+            // Location
+            resp.add_val(location);
 
-            // resp.add_key("fightversion");
-            // resp.add_val(1);
+            resp.add_val(1);
+            resp.add_val(player_id);
+            resp.add_str(row.get_str(25)?);
+            resp.add_val(player_lvl);
+            for _ in 0..2 {
+                resp.add_val(player_hp);
+            }
+            for val in player_attributes {
+                resp.add_val(val);
+            }
 
-            // player_poll(player_id, "", &db, resp).await
+            // Portrait
+            for portrait_offset in 26..26 + 9 {
+                resp.add_val(row.get::<i32>(portrait_offset)?);
+            }
+
+            resp.add_val(0); // special influencer portraits
+
+            resp.add_val(row.get::<i32>(35)?); // race
+            resp.add_val(row.get::<i32>(36)?); // gender
+            resp.add_val(row.get::<i32>(37)?); // class
+
+            // Main weapon
+            for _ in 0..12 {
+                resp.add_val(0);
+            }
+
+            // Sub weapon
+            for _ in 0..12 {
+                resp.add_val(0);
+            }
+
+            // Monster
+            for _ in 0..2 {
+                resp.add_val(monster_id);
+            }
+            resp.add_val(player_lvl); // monster lvl
+            resp.add_val(monster_hp);
+            resp.add_val(monster_hp);
+            for attr in monster_attributes {
+                resp.add_val(attr);
+            }
+            resp.add_val(monster_id);
+            for _ in 0..11 {
+                resp.add_val(0);
+            }
+            resp.add_val(3); // Class?
+
+            // Probably also items
+            // This means just changing the portrait into the player
+            resp.add_val(-1);
+            for _ in 0..23 {
+                resp.add_val(0);
+            }
+
+            resp.add_key("fight.r");
+            resp.add_str(&format!("{player_id},0,-1000"));
+
+            // TODO: actually simulate fight
+
+            resp.add_key("winnerid");
+            resp.add_val(player_id);
+
+            resp.add_key("fightversion");
+            resp.add_val(1);
+
+            let activity_id = row.get::<i32>(38)?;
+
+            drop(row);
+            let mut res = tx
+                .query(
+                    "UPDATE activity as a
+                 SET typ = 0, subtyp = 0, started = 0, busyuntil = 0
+                 WHERE a.id = ?1",
+                    [activity_id],
+                )
+                .await?;
+            let row = res.next().await?;
+            drop(row);
+            drop(res);
+
+            let mut res = tx
+                .query(
+                    "UPDATE character as c
+                 SET silver = silver + ?2, mushrooms = mushrooms + ?3, honor = \
+                     honor + ?4
+                 WHERE c.id = ?1",
+                    params!(player_id, silver, mush, honor_won),
+                )
+                .await?;
+            let row = res.next().await?;
+            drop(row);
+            drop(res);
+
+            // TODO: Reroll quests, add item & save fight somewhere for rewatch I suppose
+
+            tx.commit().await?;
+
+            player_poll(player_id, "", &db, resp).await
         }
         "PlayerMountBuy" => {
             todo!();
@@ -920,21 +1002,15 @@ async fn request(
         }
         "PlayerTutorialStatus" => {
             let status = command_args.get_int(0, "tutorial status")?;
-
             if !(0..=0xFFFFFFF).contains(&status) {
                 Err(ServerError::BadRequest)?;
             }
-            todo!();
-            // match sqlx::query!(
-            //     "UPDATE CHARACTER SET tutorialstatus = ?1 WHERE ID = ?2",
-            //     status as i32, player_id,
-            // )
-            // .execute(&db)
-            // .await
-            // {
-            //     Ok(_) => ServerResponse::Success,
-            //     Err(_) => INTERNAL_ERR,
-            // }
+            db.query(
+                "UPDATE CHARACTER SET tutorialstatus = ?1 WHERE ID = ?2",
+                [status as i32, player_id],
+            )
+            .await?;
+            Ok(ServerResponse::Success)
         }
         "Poll" => {
             Ok(player_poll(player_id, "poll", &db, Default::default()).await?)
@@ -967,6 +1043,21 @@ async fn request(
                     db.query(
                         "UPDATE character set class = ?1 WHERE id = ?2",
                         params!(class as i32 + 1, player_id),
+                    )
+                    .await?;
+                }
+                Command::SetPassword { new } => {
+                    let hashed_password =
+                        sha1_hash(&format!("{new}{HASH_CONST}"));
+                    db.query(
+                        "UPDATE LOGINDATA as l
+                        SET pwhash = ?1
+                        WHERE l.id = (
+                            SELECT character.logindata
+                            FROM character
+                            WHERE id = ?2
+                        )",
+                        params!(hashed_password, player_id),
                     )
                     .await?;
                 }
@@ -1416,6 +1507,7 @@ async fn player_poll(
             &[pid],
         )
         .await?;
+
     let res = first_row(res).await?;
 
     let calendar_info = "12/1/8/1/3/1/25/1/5/1/2/1/3/2/1/1/24/1/18/5/6/1/22/1/\
@@ -2327,6 +2419,14 @@ struct CheatCmd {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Level { level: i16 },
-    Class { class: i16 },
+    Level {
+        level: i16,
+    },
+    Class {
+        class: i16,
+    },
+    #[command(name = "set_password")]
+    SetPassword {
+        new: String,
+    },
 }
