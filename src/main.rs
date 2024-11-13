@@ -173,7 +173,7 @@ async fn request(
         println!("Received: {command_name}: {}", command_args);
     }
     let command_args: Vec<_> = command_args.split('/').collect();
-    let command_args = CommandArguments(command_args);
+    let args = CommandArguments(command_args);
     let mut rng = fastrand::Rng::new();
 
     if player_id < 0
@@ -186,22 +186,21 @@ async fn request(
     }
 
     match command_name {
-        "PlayerSetFace" => player_set_face(&command_args, &db, player_id).await,
+        "PlayerSetFace" => player_set_face(&args, &db, player_id).await,
         "AccountCreate" => {
-            let name = command_args.get_str(0, "name")?;
-            let password = command_args.get_str(1, "password")?;
-            let mail = command_args.get_str(2, "mail")?;
-            let gender = command_args.get_int(3, "gender")?;
+            let name = args.get_str(0, "name")?;
+            let password = args.get_str(1, "password")?;
+            let mail = args.get_str(2, "mail")?;
+            let gender = args.get_int(3, "gender")?;
             let gender =
                 Gender::from_i64(gender.saturating_sub(1)).get("gender")?;
-            let race =
-                Race::from_i64(command_args.get_int(4, "race")?).get("race")?;
+            let race = Race::from_i64(args.get_int(4, "race")?).get("race")?;
 
-            let class = command_args.get_int(5, "class")?;
+            let class = args.get_int(5, "class")?;
             let class =
                 Class::from_i64(class.saturating_sub(1)).get("class")?;
 
-            let portrait_str = command_args.get_str(6, "portrait")?;
+            let portrait_str = args.get_str(6, "portrait")?;
             let portrait = Portrait::parse(portrait_str).get("portrait")?;
 
             if is_invalid_name(name) {
@@ -358,9 +357,9 @@ async fn request(
                 .build()
         }
         "AccountLogin" => {
-            let name = command_args.get_str(0, "name")?;
-            let full_hash = command_args.get_str(1, "password hash")?;
-            let login_count = command_args.get_int(2, "login count")?;
+            let name = args.get_str(0, "name")?;
+            let full_hash = args.get_str(1, "password hash")?;
+            let login_count = args.get_int(2, "login count")?;
 
             let res = db
                 .query(
@@ -406,7 +405,7 @@ async fn request(
             Ok(ServerResponse::Success)
         }
         "PlayerSetDescription" => {
-            let description = command_args.get_str(0, "description")?;
+            let description = args.get_str(0, "description")?;
             let _description = from_sf_string(description);
             db.query(
                 "UPDATE Character SET description = ?1 WHERE id = ?2",
@@ -421,10 +420,10 @@ async fn request(
             .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
             .build(),
         "GroupGetHallOfFame" => {
-            let rank = command_args.get_int(0, "rank").unwrap_or_default();
-            let pre = command_args.get_int(2, "pre").unwrap_or_default();
-            let post = command_args.get_int(3, "post").unwrap_or_default();
-            let name = command_args.get_str(1, "name or rank");
+            let rank = args.get_int(0, "rank").unwrap_or_default();
+            let pre = args.get_int(2, "pre").unwrap_or_default();
+            let post = args.get_int(3, "post").unwrap_or_default();
+            let name = args.get_str(1, "name or rank");
 
             let rank = match rank {
                 1.. => rank,
@@ -496,10 +495,10 @@ async fn request(
                 .build()
         }
         "PlayerGetHallOfFame" => {
-            let rank = command_args.get_int(0, "rank").unwrap_or_default();
-            let pre = command_args.get_int(2, "pre").unwrap_or_default();
-            let post = command_args.get_int(3, "post").unwrap_or_default();
-            let name = command_args.get_str(1, "name or rank");
+            let rank = args.get_int(0, "rank").unwrap_or_default();
+            let pre = args.get_int(2, "pre").unwrap_or_default();
+            let post = args.get_int(3, "post").unwrap_or_default();
+            let name = args.get_str(1, "name or rank");
 
             let rank = match rank {
                 1.. => rank,
@@ -564,10 +563,10 @@ async fn request(
                 return Ok(ServerResponse::Success);
             }
 
-            let name = command_args.get_str(0, "account name")?;
-            let full_hash = command_args.get_str(1, "pw hash")?;
-            let login_count = command_args.get_int(2, "login count")?;
-            let mail = command_args.get_str(3, "account mail")?;
+            let name = args.get_str(0, "account name")?;
+            let full_hash = args.get_str(1, "pw hash")?;
+            let login_count = args.get_int(2, "login count")?;
+            let mail = args.get_str(3, "account mail")?;
 
             let mut res = db
                 .query(
@@ -595,7 +594,7 @@ async fn request(
             Ok(ServerResponse::Success)
         }
         "PendingRewardView" => {
-            let _id = command_args.get_int(0, "msg_id")?;
+            let _id = args.get_int(0, "msg_id")?;
             let mut resp = ResponseBuilder::default();
             resp.add_key("pendingrewardressources");
             for v in 1..=6 {
@@ -607,9 +606,44 @@ async fn request(
 
             resp.build()
         }
+        "PlayerGambleGold" => {
+            let mut silver = args.get_int(0, "gold value")?;
+
+            let tx = db.transaction().await?;
+            let res = tx
+                .query("SELECT silver FROM character where id = ?1", [player_id])
+                .await?;
+            let player_silver = first_int(res).await?;
+
+            if silver < 0 || player_silver < silver {
+                return Err(ServerError::BadRequest);
+            }
+
+            if rng.bool() {
+                silver *= 2;
+            } else {
+                silver = -silver;
+            }
+
+            let mut res = tx
+                .query(
+                    "UPDATE character SET silver = ?1 WHERE id = ?2",
+                    [player_silver + silver, player_id as i64],
+                )
+                .await?;
+            let row = res.next().await?;
+            drop(row);
+
+            tx.commit().await?;
+
+            ResponseBuilder::default()
+                .add_key("gamblegoldvalue")
+                .add_val(silver)
+                .build()
+        }
         "PlayerAdventureStart" => {
-            let quest = command_args.get_int(0, "quest")?;
-            let skip_inv = command_args.get_int(1, "skip_inv")?;
+            let quest = args.get_int(0, "quest")?;
+            let skip_inv = args.get_int(1, "skip_inv")?;
 
             if !(1..=3).contains(&quest) || !(0..=1).contains(&skip_inv) {
                 Err(ServerError::BadRequest)?;
@@ -629,7 +663,8 @@ async fn request(
                 q3.length as ql3,
 
                 activity.id as activityid,
-                character.tavern as tavern_id
+                character.tavern as tavern_id,
+                tfa
 
                 FROM character LEFT JOIN activity ON activity.id = \
                      character.activity LEFT JOIN TAVERN on character.tavern \
@@ -656,10 +691,17 @@ async fn request(
                 2 => row.get::<i32>(4)?,
                 _ => row.get::<i32>(5)?,
             } as f32
-                * mount_effect;
+                * mount_effect.ceil().max(0.0);
+            let quest_length = quest_length as i32;
 
             let activity_id: i32 = row.get(6)?;
             let tavern_id: i32 = row.get(7)?;
+            let tfa: i32 = row.get(8)?;
+
+            if tfa < quest_length {
+                // TODO: Actual error
+                return Err(ServerError::StillBusy);
+            }
 
             drop(row);
 
@@ -670,7 +712,7 @@ async fn request(
                     params!(
                         activity_id,
                         quest as i32,
-                        in_seconds(quest_length.ceil().max(0.0) as i64)
+                        in_seconds(quest_length as i64)
                     ),
                 )
                 .await?;
@@ -929,7 +971,7 @@ async fn request(
             drop(row);
             drop(res);
 
-            // TODO: Reroll quests, add item & save fight somewhere for rewatch I suppose
+            // TODO: Reroll quests, add item & save fight somewhere for rewatch (save)
 
             tx.commit().await?;
 
@@ -1016,7 +1058,7 @@ async fn request(
             // }
         }
         "PlayerTutorialStatus" => {
-            let status = command_args.get_int(0, "tutorial status")?;
+            let status = args.get_int(0, "tutorial status")?;
             if !(0..=0xFFFFFFF).contains(&status) {
                 Err(ServerError::BadRequest)?;
             }
@@ -1032,14 +1074,13 @@ async fn request(
         }
         "UserSettingsUpdate" => Ok(ServerResponse::Success),
         "PlayerWhisper" => {
-            let name = command_args.get_str(0, "name")?.to_lowercase();
+            let name = args.get_str(0, "name")?.to_lowercase();
             if name != "server" {
                 todo!()
             }
-            let res = CheatCmd::try_parse_from(
-                command_args.get_str(1, "args")?.split(' '),
-            )
-            .map_err(|_| ServerError::BadRequest)?;
+            let res =
+                CheatCmd::try_parse_from(args.get_str(1, "args")?.split(' '))
+                    .map_err(|_| ServerError::BadRequest)?;
 
             match res.command {
                 Command::Level { level } => {
@@ -1047,7 +1088,8 @@ async fn request(
                         return Err(ServerError::BadRequest);
                     }
                     db.query(
-                        "UPDATE character set level = ?1, experience = 0 WHERE id = ?2",
+                        "UPDATE character set level = ?1, experience = 0 \
+                         WHERE id = ?2",
                         params!(level, player_id),
                     )
                     .await?;
@@ -1080,7 +1122,7 @@ async fn request(
             Ok(player_poll(player_id, "", &db, Default::default()).await?)
         }
         "AccountCheck" => {
-            let name = command_args.get_str(0, "name")?;
+            let name = args.get_str(0, "name")?;
 
             if is_invalid_name(name) {
                 return Err(ServerError::InvalidName)?;
@@ -1103,7 +1145,7 @@ async fn request(
             }
         }
         _ => {
-            println!("Unknown command: {command_name} - {:?}", command_args);
+            println!("Unknown command: {command_name} - {:?}", args);
             Err(ServerError::UnknownRequest)?
         }
     }
