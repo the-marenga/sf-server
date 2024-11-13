@@ -560,46 +560,34 @@ async fn request(
                 .build()
         }
         "AccountDelete" => {
-            return Ok(ServerResponse::Success);
+            let name = command_args.get_str(0, "account name")?;
+            let full_hash = command_args.get_str(1, "pw hash")?;
+            let login_count = command_args.get_int(2, "login count")?;
+            let mail = command_args.get_str(3, "account mail")?;
 
-            todo!()
-            // let Some(name) = command_args.get_str(0) else {
-            //     return ServerError::MissingArgument("name").resp();
-            // };
-            // let Some(full_hash) = command_args.get_str(1) else {
-            //     return ServerError::MissingArgument("password hash").resp();
-            // };
-            // let Some(login_count) = command_args.get_int(2) else {
-            //     return ServerError::MissingArgument("login count").resp();
-            // };
-            // let Some(_mail) = command_args.get_str(3) else {
-            //     return ServerError::MissingArgument("mail").resp();
-            // };
-            // let Ok(info) = sqlx::query!(
-            //     "SELECT character.id, pwhash FROM character LEFT JOIN \
-            //      logindata on logindata.id = character.logindata WHERE \
-            //      lower(name) = lower(?1)",
-            //     name,
-            // )
-            // .fetch_one(&db)
-            // .await
-            // else {
-            //     return INTERNAL_ERR;
-            // };
+            let mut res = db
+                .query(
+                    "SELECT character.id, pwhash FROM character LEFT JOIN \
+                     logindata on logindata.id = character.logindata WHERE \
+                     lower(name) = lower(?1) and mail = ?2",
+                    [name, mail],
+                )
+                .await?;
+            let Some(first_line) = res.next().await? else {
+                // In case we reset db and char is still in the ui
+                return Ok(ServerResponse::Success);
+            };
 
-            // let correct_full_hash =
-            //     sha1_hash(&format!("{}{login_count}", info.pwhash));
-            // if correct_full_hash != full_hash {
-            //     return ServerError::WrongPassword.resp();
-            // }
-
-            // match sqlx::query!("DELETE FROM character WHERE id = ?1", info.id)
-            //     .execute(&db)
-            //     .await
-            // {
-            //     Ok(_) => ServerResponse::Success,
-            //     Err(_) => INTERNAL_ERR,
-            // }
+            let id: i32 = first_line.get(0)?;
+            let pwhash = first_line.get_str(1)?;
+            let correct_full_hash =
+                sha1_hash(&format!("{}{login_count}", pwhash));
+            if correct_full_hash != full_hash {
+                return Err(ServerError::WrongPassword);
+            }
+            db.query("DELETE FROM character WHERE id = ?1", [id])
+                .await?;
+            Ok(ServerResponse::Success)
         }
         "PendingRewardView" => {
             let _id = command_args.get_int(0, "msg_id")?;
