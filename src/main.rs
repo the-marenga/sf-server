@@ -611,7 +611,10 @@ async fn request(
 
             let tx = db.transaction().await?;
             let res = tx
-                .query("SELECT silver FROM character where id = ?1", [player_id])
+                .query(
+                    "SELECT silver FROM character where id = ?1",
+                    [player_id],
+                )
                 .await?;
             let player_silver = first_int(res).await?;
 
@@ -793,7 +796,8 @@ async fn request(
 
                     activity.id as activity_id,
 
-                    experience
+                    experience,
+                    portrait.influencer
 
                      FROM CHARACTER LEFT JOIN PORTRAIT ON character.portrait = \
                      portrait.id LEFT JOIN tavern on tavern.id = \
@@ -890,7 +894,7 @@ async fn request(
                 resp.add_val(row.get::<i32>(portrait_offset)?);
             }
 
-            resp.add_val(0); // special influencer portraits
+            resp.add_val(row.get::<i32>(40)?); // special influencer portraits
 
             resp.add_val(row.get::<i32>(35)?); // race
             resp.add_val(row.get::<i32>(36)?); // gender
@@ -1552,7 +1556,8 @@ async fn player_poll(
 
         logindata.cryptoid,
         logindata.cryptokey,
-        logindata.logincount
+        logindata.logincount,
+        portrait.influencer
 
         FROM CHARACTER LEFT JOIN logindata on logindata.id = \
              character.logindata LEFT JOIN activity on activity.id = \
@@ -1683,7 +1688,7 @@ async fn player_poll(
     resp.add_val(res.get::<i64>(11)?); // ears
     resp.add_val(res.get::<i64>(12)?); // extra
     resp.add_val(res.get::<i64>(13)?); // horns
-    resp.add_val(30); // 26?
+    resp.add_val(res.get::<i64>(56)?); // influencer
     resp.add_val(res.get::<i64>(14)?); // race
     resp.add_val(res.get::<i64>(15)?); // Gender & Mirror
     resp.add_val(res.get::<i64>(16)?); // class
@@ -2555,4 +2560,11 @@ fn xp_for_next_level(level: i32) -> i32 {
         .ok()
         .and_then(|idx: usize| LOOKUP.get(idx).copied())
         .unwrap_or(1500000000)
+}
+
+fn get_debug_value(name: &str) -> i64 {
+    std::fs::read_to_string(format!("values/{name}.txt"))
+        .ok()
+        .and_then(|a| a.trim().parse().ok())
+        .unwrap_or(0)
 }
