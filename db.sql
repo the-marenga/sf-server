@@ -4,9 +4,18 @@ PRAGMA writable_schema = 0;
 VACUUM;
 PRAGMA INTEGRITY_CHECK;
 
+CREATE TABLE Server (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    ident TEXT NOT NULL
+);
+
+-- Add default derver
+INSERT INTO SERVER (ident) VALUES ('');
+
 CREATE TABLE Guild (
 	ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-	Name TEXT UNIQUE NOT NULL,
+	server INT NOT NULL DEFAULT 1 REFERENCES Server (ID) ON DELETE CASCADE,
+	Name TEXT NOT NULL,
 	Description TEXT,
 	Emblem TEXT,
 	Raid INT NOT NULL DEFAULT 0,
@@ -18,10 +27,11 @@ CREATE TABLE Guild (
 	Catapult INT NOT NULL DEFAULT 0 CHECK (Catapult < 4),
 	PetId INT,
 	HydraCurrentLife INT NOT NULL,
-	Attacking INT REFERENCES Guild (ID)
+	Attacking INT REFERENCES Guild (ID),
+	UNIQUE(server, name)
 );
 
-CREATE INDEX GuildHoF ON Guild (Honor DESC, ID ASC);
+CREATE INDEX GuildHoF ON Guild (server, Honor DESC, ID ASC);
 
 
 -- Everything related to the Membership of a player to a guild
@@ -175,7 +185,8 @@ CREATE TABLE Portrait (
 
 CREATE TABLE Character (
 	ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-	Name TEXT UNIQUE NOT NULL,
+	server INT NOT NULL DEFAULT 1 REFERENCES Server (ID) ON DELETE CASCADE,
+	Name TEXT NOT NULL,
 	Class INT NOT NULL,
 	Race INT NOT NULL,
 	Gender INT NOT NULL,
@@ -196,11 +207,12 @@ CREATE TABLE Character (
 	Mount INT NOT NULL DEFAULT 0,
 	MountEnd BIGINT NOT NULL DEFAULT 0,
 	TutorialStatus INT NOT NULL DEFAULT 0,
-	Guild INT REFERENCES GuildMember (ID) ON DELETE CASCADE
+	Guild INT REFERENCES GuildMember (ID) ON DELETE CASCADE,
+	UNIQUE(name, server)
 );
 
 -- CREATE INDEX HoF ON Character (Honor DESC, ID ASC) INCLUDE (NAME, level, class);
-CREATE INDEX HoF ON Character (Honor DESC, ID ASC);
+CREATE INDEX HoF ON Character (server, Honor DESC, ID ASC);
 
 CREATE TABLE ChatMessage (
 	ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,

@@ -131,31 +131,33 @@ async fn request(
         Err(ServerError::BadRequest)?;
     }
 
-    let (player_id, crypto_key) = match crypto_id == DEFAULT_CRYPTO_ID {
-        true => (-1, DEFAULT_CRYPTO_KEY.to_string()),
-        false => {
-            let mut res = db
-                .query(
-                    "SELECT character.id, cryptokey
+    let (player_id, crypto_key, server_id) =
+        match crypto_id == DEFAULT_CRYPTO_ID {
+            true => (-1, DEFAULT_CRYPTO_KEY.to_string(), -1),
+            false => {
+                let mut res = db
+                    .query(
+                        "SELECT character.id, cryptokey, character.server
                  FROM character
                  LEFT JOIN Logindata on logindata.id = character.logindata
                  WHERE cryptoid = ?1",
-                    [crypto_id],
-                )
-                .await?;
+                        [crypto_id],
+                    )
+                    .await?;
 
-            let row = res.next().await?;
+                let row = res.next().await?;
 
-            match row {
-                Some(row) => {
-                    let id = row.get(0)?;
-                    let cryptokey = row.get_str(1)?;
-                    (id, cryptokey.to_string())
+                match row {
+                    Some(row) => {
+                        let id = row.get(0)?;
+                        let cryptokey = row.get_str(1)?;
+                        let server_id = row.get(2)?;
+                        (id, cryptokey.to_string(), server_id)
+                    }
+                    None => Err(ServerError::InvalidAuth)?,
                 }
-                None => Err(ServerError::InvalidAuth)?,
             }
-        }
-    };
+        };
 
     let request = decrypt_server_request(encrypted_request, &crypto_key);
 
@@ -412,7 +414,6 @@ async fn request(
                 params!(&description, player_id),
             )
             .await?;
-
             Ok(player_poll(player_id, "", &db, Default::default()).await?)
         }
         "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
@@ -466,10 +467,10 @@ async fn request(
                         FROM GUILD as g
                         LEFT JOIN guildmember as gm on gm.guild = g.id
                         LEFT JOIN character as c on gm.id = c.guild
-                        WHERE RANK = 3
+                        WHERE server = ?3 AND RANK = 3
                         ORDER BY g.honor desc, g.id asc
                         LIMIT ?2 OFFSET ?1",
-                    [offset, limit],
+                    [offset, limit, server_id],
                 )
                 .await?;
 
@@ -506,19 +507,26 @@ async fn request(
                     let name = name?;
                     let res = db
                         .query(
-                            "WITH selected_character AS (
-                                 SELECT honor, id FROM character WHERE name = \
-                             ?1
-                            )
-                             SELECT
-                                 (SELECT COUNT(*) FROM character WHERE honor > \
-                             (SELECT honor FROM selected_character)
-                                     OR (honor = (SELECT honor FROM \
-                             selected_character)
-                                         AND id <= (SELECT id FROM \
-                             selected_character))
-                                 ) AS rank",
-                            [name],
+                            "WITH selected_character AS
+                              (SELECT honor,
+                                      id
+                               FROM CHARACTER
+                               WHERE name = ?1
+                                 AND server = ?2)
+                            SELECT
+                              (SELECT count(*)
+                               FROM CHARACTER
+                               WHERE server = ?3
+                                 AND honor >
+                                   (SELECT honor
+                                    FROM selected_character)
+                                 OR (honor =
+                                       (SELECT honor
+                                        FROM selected_character)
+                                     AND id <=
+                                       (SELECT id
+                                        FROM selected_character))) AS rank",
+                            params!(name, server_id),
                         )
                         .await?;
                     first_int(res).await?
@@ -530,9 +538,12 @@ async fn request(
 
             let mut res = db
                 .query(
-                    "SELECT name, level, honor, class FROM CHARACTER
-                     ORDER BY honor desc, id asc  LIMIT ?2 OFFSET ?1",
-                    [offset, limit],
+                    "SELECT name, level, honor, class
+                     FROM CHARACTER
+                     WHERE server = ?3
+                     ORDER BY honor desc, id asc
+                     LIMIT ?2 OFFSET ?1",
+                    [offset, limit, server_id],
                 )
                 .await?;
 
@@ -1557,7 +1568,21 @@ async fn player_poll(
         logindata.cryptoid,
         logindata.cryptokey,
         logindata.logincount,
-        portrait.influencer
+        portrait.influencer,
+
+        (
+        SELECT count(*)
+        FROM CHARACTER AS x
+        WHERE x.server = character.server
+          AND (x.honor > character.honor
+               OR (x.honor = character.honor
+                   AND x.id <= character.id))
+        ),
+        (
+        SELECT count(*)
+        FROM CHARACTER AS x
+        WHERE x.server = character.server
+        )
 
         FROM CHARACTER LEFT JOIN logindata on logindata.id = \
              character.logindata LEFT JOIN activity on activity.id = \
@@ -1659,17 +1684,10 @@ async fn player_poll(
     resp.add_val(level); // Level | Arena << 16
     resp.add_val(res.get::<i64>(3)?); // Experience
     resp.add_val(xp_for_next_level(level)); // Next Level XP
-    let honor = res.get(4)?;
+    let honor:i32 = res.get(4)?;
     resp.add_val(honor); // Honor
 
-    let hof_ref = db
-        .query(
-            "SELECT count(*) FROM character
-        WHERE honor > ?1 OR honor = ?1 AND ID <= ?2",
-            [honor, pid],
-        )
-        .await?;
-    let rank = first_int(hof_ref).await?;
+    let rank = res.get::<i64>(57)?;
     resp.add_val(rank); // Rank
 
     resp.add_val(0); // 12?
@@ -2169,10 +2187,7 @@ async fn player_poll(
     resp.add_key("ownplayername.r");
     resp.add_str(res.get_str(52)?);
 
-    let rank_ref = db
-        .query("SELECT count(*) FROM character", params!())
-        .await?;
-    let maxrank = first_int(rank_ref).await?;
+    let maxrank:i32 = res.get(58)?;
 
     resp.add_key("maxrank");
     resp.add_val(maxrank);
