@@ -4,7 +4,7 @@ use actix_web::{HttpResponse, Responder};
 #[allow(unused)]
 pub struct Request {
     pub req: String,
-    rnd: f32,
+    rnd: String,
     c: u32,
 }
 

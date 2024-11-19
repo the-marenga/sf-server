@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cargo",
+			"command": "build",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build",
+			"label": "CodeLLDB: cargo",
+			"env": {
+				"DATABASE_URL": "postgres://postgres:123@localhost:5432/sf"
+			}
+		}
+	]
+}
