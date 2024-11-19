@@ -6,4 +6,3 @@ services:
     volumes:
       - ./conf/nginx.conf:/etc/nginx/nginx.conf
       - ./certs:/etc/nginx/certs
-  

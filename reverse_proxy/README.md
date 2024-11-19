@@ -1,5 +1,5 @@
 # Usage with official SF client
-The official, unmodified *Shakes & Fidget* client requires you to use SSL. To be more specific, all the URLs are hardcoded with a `https://` prefix, and it's a lot easier to set up a reverse proxy like nginx, since you can then simply use the *Shakes & Fidget* client as-is from the official [*Shakes & Fidget* website](https://sfgame.net). The only thing then left to do is to override the `https://sfgame.net/config.json` response in your browser, such that it returns the Nginx address (https://localhost:6768 in this example) as one of the servers. TODO: Add a step by step guide for people less experienced with advanced browser dev settings like this in the root README.
+The official, unmodified *Shakes & Fidget* client requires you to use SSL. To be more specific, all the URLs are hardcoded with a `https://` prefix, and it's a lot easier to set up a reverse proxy like nginx, since you can then simply use the *Shakes & Fidget* client as-is from the official [*Shakes & Fidget* website](https://sfgame.net). The only thing then left to do is to override the `https://sfgame.net/config.json` response in your browser, such that it returns the Nginx address (https://localhost:6768 in this example) as one of the servers.
 
 ## Setting up Nginx as a reverse proxy
 ### Docker
