@@ -9,24 +9,24 @@ Currently, this project is in the early stages of development, and it is unclear
 To run this project for yourself, you can simply clone this repository and build the server yourself, or check the [releases](https://github.com/the-marenga/sf-server/releases) page for pre-built binaries.
 
 ### Connecting clients to your server
-Launching the server by itself will publish the server on `http://0.0.0.0:6768` by default. Only `HTTP` (without) TLS/SSL is supported by the Rust application itself, that becomes a challenge when you want to use the official *Shakes & Fidget* client, to connect. That is because it prefixes all server connections with *https://*. To overcome this, there are two possible options: For a quick and easy setup (for example as a development environment), you can use a **(I)** *Firefox* extension. For a more permanent solution, you can use **(II)** a reverse proxy like *nginx*, which will only require a one-time setup on the server side, unlike the add-on, which every user who wants to connect to play on the server will have to install. Both options are described in the following sections, and examples are provided inside this repository.
+Launching the server by itself will publish the server on `http://0.0.0.0:6768` by default. Only `HTTP` (without) TLS/SSL is supported by the Rust application itself, that becomes a challenge when you want to use the official *Shakes & Fidget* client, to connect. That is because it prefixes all server connections with *https://*. To overcome this, it is recommended to use a reverse proxy **(II)** in order to have the traffic between the client and the server run over the `HTTPS` protocol.
 
-In both cases you will need to override the `https://sfgame.net/config.json` response in your browser, such that it returns the address of your server as one of the (or if you wish: the only) server(s). This is necessary, for both options, and the only way around it would be to redistribute the client yourself, which we already strongly advised against. Instructions for overriding the `config.json` response can also be found in the respective section below.
+In addition, a *Firefox* extension is provided as a quality of life feature, if your browser does not persist the `config.json` overrides you set. Instructions for manually overriding the `config.json` response can also be found in the respective section below.
 
 #### (I) Usage with Firefox extension
-In the [/extension](https://github.com/the-marenga/sf-server/tree/main/extension) directory of this repository, you can find a *Firefox* add-on, that effectively acts like a patch to the official client to no longer require `HTTPS`.
+In the [/extension](https://github.com/the-marenga/sf-server/tree/main/extension) directory of this repository, you can find a *Firefox* add-on, that can be used, if your browser forces you to override the `config.json` request over and over again by not persisting it after e.g. a browser restart. Some *Chromium*-based browsers seem to persist the overrides, others don't. Best you see for yourself how your Browser behaves and install the extension as needed.
 
-For obvious reasons, this is not feasible for any production-esque environments, but it is a quick and easy way to try things out. Detailes instructions on how to install the extension can be found in the [README.md](https://github.com/the-marenga/sf-server/tree/main/extension/README.md) file in the same directory.
+Detailed instructions on how to install the extension can be found in the [README.md](https://github.com/the-marenga/sf-server/tree/main/extension/README.md) file in the same directory.
 
 #### (II) Usage with *nginx* as a reverse proxy
 The more permanent solution is to use a reverse proxy like *nginx*. This setup has only be done once on the server that hosts the  *sf-server*, as opposed to the *Firefox* extension, which needs to be installed on every client/player that wants to connect to the server.
 
 Detailed instructions on how to set up *nginx* as a reverse proxy using [*Docker*](https://www.docker.com/) can be found in the [reverse_proxy](https://github.com/the-marenga/sf-server/tree/main/reverse_proxy) directory of this repository.
 
-Advanced users are can also make a *Docker* image of this project, to also run in the same *Docker* stack as *nginx*. Currently, we do not provide the image or Dockerfile outselves, but if you make one your contribution is welcome.
+Advanced users could also make a *Docker* image of this project, to also run in the same *Docker* stack as *nginx*. Currently, we do not provide the image or Dockerfile outselves, but if you make one your contribution is welcome.
 
-#### Overriding the `config.json` response
-As mentioned above, this step is neccessary for both of the options. To override the `config.json` response in your browser, you will have to use the developer tools of your browser, depending on what browser you use, the steps might vary slightly. When in doubt, you can always use a search engine to find out how to do it in your specific browser.
+#### Overriding the `config.json` response manually
+To override the `config.json` response in your browser, you will have to use the developer tools of your browser, depending on what browser you use, the steps might vary slightly. When in doubt, you can always use a search engine to find out how to do it in your specific browser. In *Chromium*-based browsers, this only has to be done once, if you find yourself having to repeat this, consider using the **(I)** *Firefox* extension.
 
 The following steps are for *Chrome*:
 1. Open the developer tools by pressing `F12` or `Ctrl+Shift+I`.
