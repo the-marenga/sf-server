@@ -64,7 +64,10 @@ pub async fn connect_init_db() -> Result<libsql::Connection, ServerError> {
         .await?
         .connect()?;
 
-    // db.execute_batch(include_str!("../db.sql")).await?;
+    // TODO: Query the db to see, if this exists already
+    if true {
+        db.execute_batch(include_str!("../db.sql")).await?;
+    }
 
     Ok(db)
 }
@@ -1643,12 +1646,6 @@ async fn player_poll(
     resp.add_key("tavernspecialend");
     resp.add_val(-1);
 
-    resp.add_key("dungeonlevel(26)");
-    resp.add_str("0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0");
-
-    resp.add_key("shadowlevel(21)");
-    resp.add_str("0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0");
-
     resp.add_key("attbonus1(3)");
     resp.add_str("0/0/0/0");
     resp.add_key("attbonus2(3)");
@@ -1684,7 +1681,7 @@ async fn player_poll(
     resp.add_val(level); // Level | Arena << 16
     resp.add_val(res.get::<i64>(3)?); // Experience
     resp.add_val(xp_for_next_level(level)); // Next Level XP
-    let honor:i32 = res.get(4)?;
+    let honor: i32 = res.get(4)?;
     resp.add_val(honor); // Honor
 
     let rank = res.get::<i64>(57)?;
@@ -2187,7 +2184,7 @@ async fn player_poll(
     resp.add_key("ownplayername.r");
     resp.add_str(res.get_str(52)?);
 
-    let maxrank:i32 = res.get(58)?;
+    let maxrank: i32 = res.get(58)?;
 
     resp.add_key("maxrank");
     resp.add_val(maxrank);
@@ -2289,10 +2286,7 @@ async fn player_poll(
 
     resp.add_key("dailytasklist");
     resp.add_val(98);
-    for typ_id in 1..=99 {
-        if typ_id == 73 {
-            continue;
-        }
+    for typ_id in 1..=10 {
         resp.add_val(typ_id); // typ
         resp.add_val(0); // current
         resp.add_val(typ_id); // target
@@ -2409,7 +2403,11 @@ async fn player_poll(
 fn add_reward_previews(resp: &mut ResponseBuilder) {
     for i in 1..=3 {
         resp.add_val(0);
-        resp.add_val(i);
+        resp.add_val(match i {
+            1 => 400,
+            2 => 123,
+            _ => 999,
+        });
         let count = 16;
         resp.add_val(count);
         // amount of rewards
