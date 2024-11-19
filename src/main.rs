@@ -470,7 +470,7 @@ async fn request(
                         FROM GUILD as g
                         LEFT JOIN guildmember as gm on gm.guild = g.id
                         LEFT JOIN character as c on gm.id = c.guild
-                        WHERE server = ?3 AND RANK = 3
+                        WHERE g.server = ?3 AND RANK = 3
                         ORDER BY g.honor desc, g.id asc
                         LIMIT ?2 OFFSET ?1",
                     [offset, limit, server_id],
