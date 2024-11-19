@@ -72,11 +72,12 @@ fn set_up_logging() {
 
 pub async fn connect_db() -> Result<Pool<Postgres>, Box<dyn std::error::Error>>
 {
-    Ok(PgPoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(500)
         .acquire_timeout(Duration::from_secs(10))
         .connect(env!("DATABASE_URL"))
-        .await?)
+        .await?;
+    Ok(pool)
 }
 
 #[derive(Debug)]
@@ -138,6 +139,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     let request = decrypt_server_request(encrypted_request, &crypto_key);
 
     if request.len() < DEFAULT_SESSION_ID.len() + 5 {
+        warn!("Bad request: decrypted request length is too short. Req: {}", request);
         return Error::BadRequest.resp();
     }
 
@@ -314,12 +316,17 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             let mut quests = [0; 3];
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
-                    "INSERT INTO QUEST (monster, location, length) VALUES \
-                     ($1, $2, $3) returning ID",
                 let quest_id = match sqlx::query_scalar!(
+                    "INSERT INTO QUEST (monster, location, length, xp, \
+                     silver, mushrooms, item) VALUES ($1, $2, $3, $4, $5, $6, \
+                     $7) returning ID",
                     139,
                     1,
                     60,
+                    100,
+                    1000,
+                    0,
+                    None::<i32>
                 )
                 .fetch_one(&mut *tx)
                 .await
@@ -423,11 +430,25 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
+            let equipment_id = match sqlx::query_scalar!(
+                "INSERT INTO Equipment DEFAULT VALUES returning ID"
+            )
+            .fetch_one(&mut *tx)
+            .await
+            {
+                Ok(equipment_id) => equipment_id,
+                Err(e) => {
+                    error!("Error inserting equipment: {:?}", e);
+                    _ = tx.rollback().await;
+                    return INTERNAL_ERR;
+                }
+            };
+
             match sqlx::query_scalar!(
                 "INSERT INTO Character
                 (Name, Class, Attributes, AttributesBought, LoginData, Tavern, \
-                 Bag, Portrait, Gender, Race, Activity)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                 Bag, Portrait, Gender, Race, Activity, Equipment)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                 name,
                 class as i32 + 1,
                 attr_id,
@@ -438,7 +459,8 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 portrait_id,
                 gender as i32 + 1,
                 race as i32,
-                activity_id
+                activity_id,
+                equipment_id
             )
             .execute(&mut *tx)
             .await
@@ -542,10 +564,12 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
             player_poll(player_id, "", &db, Default::default()).await
         }
-        "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
-            .add_key("helpshiftauthtoken")
-            .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
-            .build(),
+        "PlayerHelpshiftAuthtoken" => {
+            ResponseBuilder::default()
+                .add_key("helpshiftauthtoken")
+                .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
+                .build()
+        }
         "PlayerGetHallOfFame" => {
             let rank = command_args.get_int(0).unwrap_or_default();
             let pre = command_args.get_int(2).unwrap_or_default();
@@ -991,7 +1015,9 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 Err(_) => INTERNAL_ERR,
             }
         }
-        "Poll" => player_poll(player_id, "poll", &db, Default::default()).await,
+        "Poll" => {
+            player_poll(player_id, "poll", &db, Default::default()).await
+        }
         "AccountCheck" => {
             let Some(name) = command_args.get_str(0) else {
                 return Error::MissingArgument("name").resp();
