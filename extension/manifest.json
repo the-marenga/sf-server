@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "name": "S&F Custom Servers",
+  "version": "1.0",
+  "description": "Allows playing on custom servers using the official client",
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "https://sfgame.net/config.json"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  }
+}

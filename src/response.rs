@@ -1,4 +1,10 @@
-use actix_web::{HttpResponse, Responder};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use thiserror::Error;
+
+use crate::RawItem;
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(unused)]
@@ -8,28 +14,49 @@ pub struct Request {
     c: u32,
 }
 
-pub enum Response {
+pub enum ServerResponse {
     Success,
     Data(String),
-    Error(Error),
 }
 
-pub enum Error {
+#[derive(Debug, Error)]
+pub enum ServerError {
+    #[error("name is not available")]
     InvalidName,
+    #[error("character exists")]
     CharacterExists,
+    #[error("bad request")]
     BadRequest,
-    UnknownRequest,
+    #[error("wrong pass")]
     WrongPassword,
+    #[error("command requires valid session")]
     InvalidAuth,
+    #[error("unknown request")]
+    UnknownRequest,
+    #[error("command missing argument: {0}")]
     MissingArgument(&'static str),
-    Internal,
+    #[error("need more gold")]
     NotEnoughMoney,
+    #[error("still busy")]
     StillBusy,
+    #[error("cannot do this right now2")]
+    NotRightNow2,
+    #[error("internal server error: {0}")]
+    DBError(#[from] libsql::Error),
+    #[error("internal server error")]
+    Internal,
 }
 
-impl Error {
-    pub fn resp(self) -> Response {
-        Response::Error(self)
+impl From<ServerError> for Response {
+    fn from(error: ServerError) -> Response {
+        let status = StatusCode::OK;
+        match Response::builder()
+            .status(status)
+            .body(axum::body::Body::new(format!("error:{error}")))
+        {
+            Ok(resp) => resp,
+            Err(_) => status.into_response(),
+        }
     }
 }
 
@@ -40,6 +67,29 @@ pub struct ResponseBuilder {
 }
 
 impl ResponseBuilder {
+    pub fn add_dyn_item(
+        &mut self,
+        name: impl AsRef<str>,
+    ) -> &mut ResponseBuilder {
+        for _ in 0..12 {
+            self.add_val(0);
+        }
+        return self;
+
+        let path = format!("items/{}.json", name.as_ref());
+        let Some(weapon) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|a| serde_json::from_str::<RawItem>(&a).ok())
+        else {
+            for _ in 0..12 {
+                self.add_val(0);
+            }
+            return self;
+        };
+        weapon.serialize_response(self);
+        self
+    }
+
     pub fn add_key(&mut self, key: &str) -> &mut ResponseBuilder {
         if !self.resp.is_empty() {
             self.resp.push('&')
@@ -75,46 +125,27 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn build(&mut self) -> Response {
+    pub fn build<T>(&mut self) -> Result<ServerResponse, T> {
         let mut a = String::new();
         std::mem::swap(&mut a, &mut self.resp);
-        Response::Data(a)
+        Ok(ServerResponse::Data(a))
     }
 }
 
-impl Error {
-    pub fn error_str(&self) -> String {
-        match self {
-            Error::InvalidName => "name is not available",
-            Error::CharacterExists => "character exists",
-            Error::BadRequest => "bad request",
-            Error::WrongPassword => "wrong pass",
-            Error::InvalidAuth => "command requires valid session",
-            Error::UnknownRequest => "unknown request",
-            Error::MissingArgument(name) => {
-                return format!("command missing argument: {name}")
-            }
-            Error::Internal => "internal server error",
-            Error::NotEnoughMoney => "need more gold",
-            Error::StillBusy => "still busy",
-        }
-        .to_string()
-    }
-}
+impl From<ServerResponse> for Response {
+    fn from(resp: ServerResponse) -> Response {
+        let status = StatusCode::OK;
 
-impl Responder for Response {
-    type Body = actix_web::body::BoxBody;
-
-    fn respond_to(
-        self,
-        _req: &actix_web::HttpRequest,
-    ) -> HttpResponse<Self::Body> {
-        let body = match self {
-            Response::Success => "Success:".to_string(),
-            Response::Data(d) => d,
-            Response::Error(e) => format!("error:{}", e.error_str()),
+        let body = match resp {
+            ServerResponse::Success => "Success:".to_string(),
+            ServerResponse::Data(data) => data,
         };
-
-        HttpResponse::Ok().body(body)
+        match Response::builder()
+            .status(status)
+            .body(axum::body::Body::new(body))
+        {
+            Ok(resp) => resp,
+            Err(_) => status.into_response(),
+        }
     }
 }
