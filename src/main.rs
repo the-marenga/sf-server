@@ -1,8 +1,12 @@
+#[macro_use]
+extern crate log;
+
 use std::time::Duration;
 
 use actix_cors::Cors;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine;
+use colog::format::CologStyle;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use serde::{Deserialize, Serialize};
@@ -36,6 +40,36 @@ const DEFAULT_SESSION_ID: &str = "00000000000000000000000000000000";
 const DEFAULT_CRYPTO_KEY: &str = "[_/$VV&*Qg&)r?~g";
 const SERVER_VERSION: u32 = 2001;
 
+pub struct CustomMessageFormatter;
+
+impl CologStyle for CustomMessageFormatter {
+    fn level_token(&self, level: &log::Level) -> &str {
+        match *level {
+            log::Level::Error => "ERROR",
+            log::Level::Warn => "WARN ",
+            log::Level::Info => "INFO ",
+            log::Level::Debug => "DEBUG",
+            log::Level::Trace => "TRACE",
+        }
+    }
+
+    fn prefix_token(&self, level: &log::Level) -> String {
+        format!(
+            "[{}][{}]",
+            Local::now().format("%Y-%m-%dT%H:%M:%S"),
+            self.level_color(level, self.level_token(level)),
+        )
+    }
+}
+
+fn set_up_logging() {
+    colog::basic_builder()
+        .format(colog::formatter(CustomMessageFormatter))
+        // TODO: hardcoded debug for now
+        .filter(Some("sf_server"), log::LevelFilter::Debug)
+        .init();
+}
+
 pub async fn connect_db() -> Result<Pool<Postgres>, Box<dyn std::error::Error>>
 {
     Ok(PgPoolOptions::new()
@@ -63,6 +97,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
     let db = connect_db().await.unwrap();
 
     if request.len() < DEFAULT_CRYPTO_ID.len() + 5 {
+        warn!("Bad request: request length is too short. Req: {}", request);
         return Error::BadRequest.resp();
     }
 
@@ -70,6 +105,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         request.split_at(DEFAULT_CRYPTO_ID.len());
 
     if encrypted_request.is_empty() {
+        debug!("Bad request: encrypted request is empty.");
         return Error::BadRequest.resp();
     }
 
@@ -88,7 +124,13 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             {
                 Ok(Some(val)) => (val.id, val.cryptokey),
                 Ok(None) => return Error::InvalidAuth.resp(),
-                Err(_) => return INTERNAL_ERR,
+                Err(e) => {
+                    error!(
+                        "Internal error while fetching crypto key: {:?}",
+                        e
+                    );
+                    return INTERNAL_ERR;
+                }
             }
         }
     };
@@ -99,14 +141,14 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         return Error::BadRequest.resp();
     }
 
-    let (_session_id, request) = request.split_at(DEFAULT_SESSION_ID.len());
+    let (session_id, request) = request.split_at(DEFAULT_SESSION_ID.len());
     // TODO: Validate session id
 
     let request = request.trim_matches('|');
 
     let (command_name, command_args) = request.split_once(':').unwrap();
     if command_name != "Poll" {
-        println!("Received: {command_name}: {}", command_args);
+        debug!("Received (session_id={}): {command_name}: {}", session_id, command_args);
     }
     let command_args: Vec<_> = command_args.split('/').collect();
 
@@ -120,6 +162,10 @@ async fn request(info: web::Query<Request>) -> impl Responder {
         ]
         .contains(&command_name)
     {
+        debug!(
+            "Invalid authentication: player_id is less than 0 for command: \
+             {command_name}"
+        );
         return Error::InvalidAuth.resp();
     }
 
@@ -268,18 +314,22 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             let mut quests = [0; 3];
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
-                let Ok(quest_id) = sqlx::query_scalar!(
                     "INSERT INTO QUEST (monster, location, length) VALUES \
                      ($1, $2, $3) returning ID",
+                let quest_id = match sqlx::query_scalar!(
                     139,
                     1,
                     60,
                 )
                 .fetch_one(&mut *tx)
                 .await
-                else {
-                    _ = tx.rollback().await;
-                    return INTERNAL_ERR;
+                {
+                    Ok(quest_id) => quest_id, // TODO: ?????
+                    Err(e) => {
+                        error!("Error inserting quest: {:?}", e);
+                        _ = tx.rollback().await;
+                        return INTERNAL_ERR;
+                    }
                 };
                 quests[i] = quest_id;
             }
@@ -373,7 +423,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 return INTERNAL_ERR;
             };
 
-            if sqlx::query_scalar!(
+            match sqlx::query_scalar!(
                 "INSERT INTO Character
                 (Name, Class, Attributes, AttributesBought, LoginData, Tavern, \
                  Bag, Portrait, Gender, Race, Activity)
@@ -392,11 +442,14 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             )
             .execute(&mut *tx)
             .await
-            .is_err()
             {
-                _ = tx.rollback().await;
-                return INTERNAL_ERR;
-            };
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Error inserting character: {:?}", e);
+                    _ = tx.rollback().await;
+                    return INTERNAL_ERR;
+                }
+            }
 
             if tx.commit().await.is_err() {
                 return INTERNAL_ERR;
@@ -446,7 +499,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
                 crypto_id.push(rc);
             }
 
-            if sqlx::query!(
+            match sqlx::query!(
                 "UPDATE logindata
                 set sessionid = $2, cryptoid = $3
                 where id = $1",
@@ -456,10 +509,13 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             )
             .execute(&db)
             .await
-            .is_err()
             {
-                return INTERNAL_ERR;
-            };
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Error updating logindata: {:?}", e);
+                    return INTERNAL_ERR;
+                }
+            }
 
             player_poll(info.id, "accountlogin", &db, Default::default()).await
         }
@@ -942,6 +998,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             };
 
             if is_invalid_name(name) {
+                trace!("Invalid name: {}", name);
                 return Error::InvalidName.resp();
             }
 
@@ -966,7 +1023,7 @@ async fn request(info: web::Query<Request>) -> impl Responder {
             }
         }
         _ => {
-            println!("Unknown command: {command_name} - {:?}", command_args);
+            debug!("Unknown command: {command_name} - {:?}", command_args);
             Error::UnknownRequest.resp()
         }
     }
@@ -2124,19 +2181,22 @@ fn is_invalid_name(name: &str) -> bool {
 
 #[get("/{tail:.*}")]
 async fn unhandled(path: web::Path<String>) -> impl Responder {
-    println!("Unhandled request: {path}");
+    debug!("Unhandled request: {path}");
     HttpResponse::NotFound()
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    let bind_addr = ("0.0.0.0", 6767);
+    set_up_logging();
+    info!("Server starting up, binding to {}:{}...", bind_addr.0, bind_addr.1);
     HttpServer::new(|| {
         App::new()
             .wrap(Cors::permissive())
             .service(request)
             .service(unhandled)
     })
-    .bind(("0.0.0.0", 6767))?
+    .bind(bind_addr)?
     .run()
     .await
 }
