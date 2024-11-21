@@ -1,16 +1,23 @@
 use std::{
     collections::HashMap,
+    convert::TryInto,
     fmt::Write,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
-    extract::Query, http::Method, response::Response, routing::get, Router,
+    extract::{Query, Request},
+    http::Method,
+    response::Response,
+    routing::get,
+    Router,
 };
 use base64::Engine;
+use log::info;
 use misc::{from_sf_string, to_sf_string};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use reqwest::header::{CONTENT_TYPE, LOCATION};
 use serde::{Deserialize, Serialize};
 use sf_api::{
     command::AttributeType,
@@ -35,10 +42,88 @@ async fn main() {
         .allow_origin(tower_http::cors::Any);
 
     let app = Router::new()
-        .route("/cmd.php", get(request_wrapper))
+        .route("/cmd.php", get(handle_cmd))
+        .route("/req.php", get(handle_req))
+        .route("/*key", get(forward))
+        .route("/", get(forward))
         .layer(cors);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+pub async fn forward(req: Request) -> Response {
+    let uri = req.uri();
+    let target_url = format!("https://sfgame.net{}", uri);
+    let client = reqwest::Client::new();
+
+    if uri == "/js/build.json" {
+        let resp = client.get(&target_url).send().await.unwrap();
+        let text = resp.text().await.unwrap();
+        let mut json: HashMap<String, String> =
+            serde_json::from_str(&text).unwrap();
+        let fw = json.get_mut("frameworkUrl").unwrap();
+        *fw = fw.split_once(".com").unwrap().1.to_string();
+
+        return Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::new(serde_json::to_string(&json).unwrap()))
+            .unwrap();
+    }
+
+    if target_url.ends_with(".framework.js.gz") {
+        let target_url = format!("https://cdn.playa-games.com{uri}");
+        info!("Forwarded: {target_url}");
+        let resp = client.get(target_url).send().await.unwrap();
+        let raw = resp.text().await.unwrap();
+
+        return Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "application/javascript")
+            .body(axum::body::Body::from(raw.replace(
+                "return hasConsentForVendor(vendorID)", "return true",
+            )))
+            .unwrap();
+    }
+
+    info!("Forwarded: {target_url}");
+
+    if [".webp", ".png", ".jpg"]
+        .into_iter()
+        .any(|a| target_url.ends_with(a))
+    {
+        // They cors allow any origin for images, but block some other stuff
+        return Response::builder()
+            .status(307)
+            .header(LOCATION, &target_url)
+            .body(axum::body::Body::empty())
+            .unwrap();
+    }
+
+    // Forward the request to the target server
+    let response = match client.get(target_url).send().await {
+        Ok(response) => response,
+        Err(_) => {
+            return Response::builder()
+                .status(500)
+                .body(axum::body::Body::from("Error forwarding the request"))
+                .unwrap();
+        }
+    };
+
+    // Stream the response back to the client
+    let status = response.status();
+    let headers = response.headers().clone();
+
+    let out_stream = response.bytes_stream();
+
+    let mut builder = Response::builder().status(status);
+    for (key, value) in headers.iter() {
+        builder = builder.header(key, value);
+    }
+    builder
+        .body(axum::body::Body::from_stream(out_stream))
+        .unwrap()
 }
 
 pub mod misc;
@@ -91,29 +176,10 @@ impl<'a> CommandArguments<'a> {
     }
 }
 
-async fn request_wrapper(
-    req: Query<HashMap<String, String>>,
+async fn handle_cmd(
+    req_params: Query<HashMap<String, String>>,
 ) -> Result<Response, Response> {
-    // Rust can infer simple `?` conversions, but the `request()` function
-    // exceeds that limit. This is why we manually map this here
-    request(req).await.map_err(|a| a.into()).map(|a| a.into())
-}
-
-pub trait OptionGet<V> {
-    fn get(self, name: &'static str) -> Result<V, ServerError>;
-}
-
-impl<T> OptionGet<T> for Option<T> {
-    fn get(self, name: &'static str) -> Result<T, ServerError> {
-        self.ok_or_else(|| ServerError::MissingArgument(name))
-    }
-}
-
-async fn request(
-    Query(req_params): Query<HashMap<String, String>>,
-) -> Result<ServerResponse, ServerError> {
     let db = get_db().await?;
-
     let command_name = req_params.get("req").get("request")?.as_str();
     let crypto_id = req_params.get("sid").get("crypto_id")?;
     let command_args = req_params.get("params").get("command_args")?;
@@ -134,7 +200,8 @@ async fn request(
                 crypto_id
             )
             .fetch_optional(&db)
-            .await?;
+            .await
+            .map_err(ServerError::DBError)?;
 
             match res {
                 Some(row) => {
@@ -146,14 +213,104 @@ async fn request(
             }
         }
     };
+    let command_args: Vec<_> = command_args.split('/').collect();
+    let args = CommandArguments(command_args);
 
-    // TODO: validate req header session id & player_id
+    handle_command(db, command_name, args, player_id, server_id)
+        .await
+        .map_err(|a| a.into())
+        .map(|a| a.into())
+}
 
+async fn handle_req(
+    req: Query<HashMap<String, String>>,
+) -> Result<Response, Response> {
+    let request = req.get("req").get("request parameter")?;
+    let db = get_db().await?;
+
+    if request.len() < DEFAULT_CRYPTO_ID.len() + 5 {
+        Err(ServerError::BadRequest)?;
+    }
+
+    let (crypto_id, encrypted_request) =
+        request.split_at(DEFAULT_CRYPTO_ID.len());
+
+    if encrypted_request.is_empty() {
+        Err(ServerError::BadRequest)?;
+    }
+
+    let (player_id, crypto_key, server_id) =
+        match crypto_id == DEFAULT_CRYPTO_ID {
+            true => (-1, DEFAULT_CRYPTO_KEY.to_string(), -1),
+            false => {
+                let res = sqlx::query!(
+                    "SELECT character.id, cryptokey, character.server
+                     FROM character
+                     LEFT JOIN Logindata on logindata.id = character.logindata
+                     WHERE cryptoid = ?1",
+                    crypto_id,
+                )
+                .fetch_optional(&db)
+                .await
+                .map_err(ServerError::DBError)?;
+
+                match res {
+                    Some(row) => {
+                        let id = row.ID;
+                        let cryptokey = row.CryptoKey;
+                        let server_id = row.server;
+                        (id, cryptokey, server_id)
+                    }
+                    None => Err(ServerError::InvalidAuth)?,
+                }
+            }
+        };
+
+    let request = decrypt_server_request(encrypted_request, &crypto_key);
+
+    if request.len() < DEFAULT_SESSION_ID.len() + 5 {
+        Err(ServerError::BadRequest)?;
+    }
+
+    let (_session_id, request) = request.split_at(DEFAULT_SESSION_ID.len());
+    // TODO: Validate session id
+
+    let request = request.trim_matches('|');
+
+    let (command_name, command_args) = request.split_once(':').unwrap();
     if command_name != "Poll" {
         println!("Received: {command_name}: {}", command_args);
     }
     let command_args: Vec<_> = command_args.split('/').collect();
     let args = CommandArguments(command_args);
+    handle_command(db, command_name, args, player_id, server_id)
+        .await
+        .map_err(|a| a.into())
+        .map(|a| a.into())
+}
+
+pub trait OptionGet<V> {
+    fn get(self, name: &'static str) -> Result<V, ServerError>;
+}
+
+impl<T> OptionGet<T> for Option<T> {
+    fn get(self, name: &'static str) -> Result<T, ServerError> {
+        self.ok_or_else(|| ServerError::MissingArgument(name))
+    }
+}
+
+async fn handle_command<'a>(
+    db: sqlx::Pool<Sqlite>,
+    command_name: &'a str,
+    args: CommandArguments<'a>,
+    player_id: i64,
+    server_id: i64,
+) -> Result<ServerResponse, ServerError> {
+    // TODO: validate req header session id & player_id
+
+    if command_name != "Poll" {
+        println!("Received: {command_name}: {:?}", args);
+    }
     let mut rng = fastrand::Rng::new();
 
     if player_id < 0
@@ -163,7 +320,7 @@ async fn request(
         ]
         .contains(&command_name)
     {
-        println!("{command_name}: {crypto_id}");
+        println!("{command_name} requires auth");
         Err(ServerError::InvalidAuth)?;
     }
 
@@ -2530,4 +2687,20 @@ fn get_debug_value(name: &str) -> i64 {
         .ok()
         .and_then(|a| a.trim().parse().ok())
         .unwrap_or(0)
+}
+
+fn decrypt_server_request(to_decrypt: &str, key: &str) -> String {
+    let text = base64::engine::general_purpose::URL_SAFE
+        .decode(to_decrypt)
+        .unwrap();
+
+    let mut my_key = [0; 16];
+    my_key.copy_from_slice(&key.as_bytes()[..16]);
+
+    let mut cipher = libaes::Cipher::new_128(&my_key);
+    cipher.set_auto_padding(false);
+    const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
+    let decrypted = cipher.cbc_decrypt(CRYPTO_IV.as_bytes(), &text);
+
+    String::from_utf8(decrypted).unwrap()
 }
