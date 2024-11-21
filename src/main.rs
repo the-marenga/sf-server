@@ -34,7 +34,7 @@ async fn main() {
         .allow_origin(tower_http::cors::Any);
 
     let app = Router::new()
-        .route("/req.php", get(request_wrapper))
+        .route("/cmd.php", get(request_wrapper))
         .layer(cors);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -43,7 +43,6 @@ async fn main() {
 pub mod misc;
 pub mod response;
 
-const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
 const DEFAULT_CRYPTO_ID: &str = "0-00000000000000";
 const DEFAULT_SESSION_ID: &str = "00000000000000000000000000000000";
 const DEFAULT_CRYPTO_KEY: &str = "[_/$VV&*Qg&)r?~g";
@@ -65,7 +64,7 @@ pub async fn connect_init_db() -> Result<libsql::Connection, ServerError> {
         .connect()?;
 
     // TODO: Query the db to see, if this exists already
-    if true {
+    if false {
         db.execute_batch(include_str!("../db.sql")).await?;
     }
 
@@ -120,60 +119,44 @@ impl<T> OptionGet<T> for Option<T> {
 async fn request(
     Query(req_params): Query<HashMap<String, String>>,
 ) -> Result<ServerResponse, ServerError> {
-    let request = req_params.get("req").get("request parameter")?;
     let db = get_db().await?;
 
-    if request.len() < DEFAULT_CRYPTO_ID.len() + 5 {
-        Err(ServerError::BadRequest)?;
-    }
+    let command_name = req_params.get("req").get("request")?.as_str();
+    let crypto_id = req_params.get("sid").get("crypto_id")?;
+    let command_args = req_params.get("params").get("command_args")?;
+    let command_args = base64::engine::general_purpose::URL_SAFE
+        .decode(command_args)
+        .map_err(|_| ServerError::BadRequest)?;
+    let command_args =
+        String::from_utf8(command_args).map_err(|_| ServerError::BadRequest)?;
 
-    let (crypto_id, encrypted_request) =
-        request.split_at(DEFAULT_CRYPTO_ID.len());
-
-    if encrypted_request.is_empty() {
-        Err(ServerError::BadRequest)?;
-    }
-
-    let (player_id, crypto_key, server_id) =
-        match crypto_id == DEFAULT_CRYPTO_ID {
-            true => (-1, DEFAULT_CRYPTO_KEY.to_string(), -1),
-            false => {
-                let mut res = db
-                    .query(
-                        "SELECT character.id, cryptokey, character.server
+    let (player_id, server_id) = match crypto_id == DEFAULT_CRYPTO_ID {
+        true => (-1, -1),
+        false => {
+            let mut res = db
+                .query(
+                    "SELECT character.id, character.server
                  FROM character
                  LEFT JOIN Logindata on logindata.id = character.logindata
                  WHERE cryptoid = ?1",
-                        [crypto_id],
-                    )
-                    .await?;
+                    [crypto_id.as_str()],
+                )
+                .await?;
 
-                let row = res.next().await?;
-
-                match row {
-                    Some(row) => {
-                        let id = row.get(0)?;
-                        let cryptokey = row.get_str(1)?;
-                        let server_id = row.get(2)?;
-                        (id, cryptokey.to_string(), server_id)
-                    }
-                    None => Err(ServerError::InvalidAuth)?,
+            let row = res.next().await?;
+            match row {
+                Some(row) => {
+                    let id = row.get(0)?;
+                    let server_id = row.get(1)?;
+                    (id, server_id)
                 }
+                None => Err(ServerError::InvalidAuth)?,
             }
-        };
+        }
+    };
 
-    let request = decrypt_server_request(encrypted_request, &crypto_key);
+    // TODO: validate req header session id & player_id
 
-    if request.len() < DEFAULT_SESSION_ID.len() + 5 {
-        Err(ServerError::BadRequest)?;
-    }
-
-    let (_session_id, request) = request.split_at(DEFAULT_SESSION_ID.len());
-    // TODO: Validate session id
-
-    let request = request.trim_matches('|');
-
-    let (command_name, command_args) = request.split_once(':').unwrap();
     if command_name != "Poll" {
         println!("Received: {command_name}: {}", command_args);
     }
@@ -184,9 +167,11 @@ async fn request(
     if player_id < 0
         && ![
             "AccountCreate", "AccountLogin", "AccountCheck", "AccountDelete",
+            "PlayerHelpshiftAuthtoken",
         ]
         .contains(&command_name)
     {
+        println!("{command_name}: {crypto_id}");
         Err(ServerError::InvalidAuth)?;
     }
 
@@ -2451,21 +2436,6 @@ fn is_invalid_name(name: &str) -> bool {
         || name.ends_with(' ')
         || name.chars().all(|a| a.is_ascii_digit())
         || name.chars().any(|a| !(a.is_alphanumeric() || a == ' '))
-}
-
-fn decrypt_server_request(to_decrypt: &str, key: &str) -> String {
-    let text = base64::engine::general_purpose::URL_SAFE
-        .decode(to_decrypt)
-        .unwrap();
-
-    let mut my_key = [0; 16];
-    my_key.copy_from_slice(&key.as_bytes()[..16]);
-
-    let mut cipher = libaes::Cipher::new_128(&my_key);
-    cipher.set_auto_padding(false);
-    let decrypted = cipher.cbc_decrypt(CRYPTO_IV.as_bytes(), &text);
-
-    String::from_utf8(decrypted).unwrap()
 }
 
 fn get_row(
