@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -110,13 +112,16 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn add_val<T: ToString>(&mut self, val: T) -> &mut ResponseBuilder {
+    pub fn add_val<T: std::fmt::Display>(
+        &mut self,
+        val: T,
+    ) -> &mut ResponseBuilder {
         if !self.key_start {
             self.resp.push('/');
         } else {
             self.key_start = false;
         }
-        self.resp.push_str(&val.to_string());
+        self.resp.write_fmt(format_args!("{val}")).unwrap();
         self
     }
     pub fn skip_key(&mut self) -> &mut ResponseBuilder {
