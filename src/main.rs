@@ -2,22 +2,28 @@ use std::{
     collections::HashMap,
     convert::TryInto,
     fmt::Write,
+    net::SocketAddr,
+    path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
-    extract::{Query, Request},
-    http::Method,
-    response::Response,
+    extract::{FromRef, Host, Query, Request},
+    handler::HandlerWithoutStateExt,
+    http::{Method, Uri},
+    response::{IntoResponse, Redirect, Response},
     routing::get,
-    Router,
+    Json, Router,
 };
 use base64::Engine;
-use log::info;
+use log::{debug, info, warn};
 use misc::{from_sf_string, to_sf_string};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use reqwest::header::{CONTENT_TYPE, LOCATION};
+use reqwest::{
+    header::{CONTENT_TYPE, LOCATION},
+    StatusCode,
+};
 use serde::{Deserialize, Serialize};
 use sf_api::{
     command::AttributeType,
@@ -32,6 +38,13 @@ use tower_http::cors::CorsLayer;
 
 use crate::response::*;
 
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+struct Ports {
+    http: u16,
+    https: u16,
+}
+
 #[tokio::main]
 async fn main() {
     // initialize tracing
@@ -41,19 +54,93 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST])
         .allow_origin(tower_http::cors::Any);
 
+    let ports = Ports {
+        http: 6767,
+        https: 6768,
+    };
+    tokio::spawn(redirect_http_to_https(ports));
+
+    use axum_server::tls_rustls::RustlsConfig;
+    let config = RustlsConfig::from_pem_file(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("certs")
+            .join("localhost.crt"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("certs")
+            .join("localhost.key"),
+    )
+    .await
+    .unwrap();
+
     let app = Router::new()
         .route("/cmd.php", get(handle_cmd))
         .route("/req.php", get(handle_req))
         .route("/*key", get(forward))
         .route("/", get(forward))
         .layer(cors);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:6767").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], ports.https));
+    debug!("listening on {}", addr);
+    axum_server::bind_rustls(addr, config)
+        .serve(app.into_make_service())
+        .await
+        .unwrap()
+}
+
+#[allow(dead_code)]
+async fn redirect_http_to_https(ports: Ports) {
+    fn make_https(
+        host: String,
+        uri: Uri,
+        ports: Ports,
+    ) -> Result<Uri, axum::BoxError> {
+        let mut parts = uri.into_parts();
+
+        parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
+
+        if parts.path_and_query.is_none() {
+            parts.path_and_query = Some("/".parse().unwrap());
+        }
+
+        let https_host =
+            host.replace(&ports.http.to_string(), &ports.https.to_string());
+        parts.authority = Some(https_host.parse()?);
+
+        Ok(Uri::from_parts(parts)?)
+    }
+
+    let redirect = move |Host(host): Host, uri: Uri| async move {
+        match make_https(host, uri, ports) {
+            Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
+            Err(error) => {
+                warn!("failed to convert URI to HTTPS: {error}");
+                Err(StatusCode::BAD_REQUEST)
+            }
+        }
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], ports.http));
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    debug!("listening on {}", listener.local_addr().unwrap());
+    axum::serve(listener, redirect.into_make_service())
+        .await
+        .unwrap();
 }
 
 pub async fn forward(req: Request) -> Response {
-    let uri = req.uri();
+    let uri = req.uri().path_and_query().unwrap().as_str();
     let target_url = format!("https://sfgame.net{}", uri);
+
+    if [".webp", ".png", ".jpg"]
+        .into_iter()
+        .any(|a| target_url.ends_with(a))
+    {
+        // They cors allow any origin for images, but block some other stuff
+        return Redirect::temporary(&target_url).into_response();
+    }
+
+    info!("Intercepted: {uri}");
+
     let client = reqwest::Client::new();
 
     if uri == "/js/build.json" {
@@ -64,66 +151,102 @@ pub async fn forward(req: Request) -> Response {
         let fw = json.get_mut("frameworkUrl").unwrap();
         *fw = fw.split_once(".com").unwrap().1.to_string();
 
-        return Response::builder()
+        Response::builder()
             .status(200)
             .header(CONTENT_TYPE, "application/json")
             .body(axum::body::Body::new(serde_json::to_string(&json).unwrap()))
-            .unwrap();
-    }
-
-    if target_url.ends_with(".framework.js.gz") {
+            .unwrap()
+    } else if uri.ends_with(".framework.js.gz") {
         let target_url = format!("https://cdn.playa-games.com{uri}");
         info!("Forwarded: {target_url}");
         let resp = client.get(target_url).send().await.unwrap();
         let raw = resp.text().await.unwrap();
 
-        return Response::builder()
+        Response::builder()
             .status(200)
             .header(CONTENT_TYPE, "application/javascript")
             .body(axum::body::Body::from(raw.replace(
                 "return hasConsentForVendor(vendorID)", "return true",
             )))
-            .unwrap();
-    }
+            .unwrap()
+    } else if uri == "/config.json" {
+        let resp = client.get(&target_url).send().await.unwrap();
+        let text = resp.text().await.unwrap();
+        let mut config: SFConfig = serde_json::from_str(&text).unwrap();
 
-    info!("Forwarded: {target_url}");
-
-    if [".webp", ".png", ".jpg"]
-        .into_iter()
-        .any(|a| target_url.ends_with(a))
-    {
-        // They cors allow any origin for images, but block some other stuff
-        return Response::builder()
-            .status(307)
-            .header(LOCATION, &target_url)
-            .body(axum::body::Body::empty())
-            .unwrap();
-    }
-
-    // Forward the request to the target server
-    let response = match client.get(target_url).send().await {
-        Ok(response) => response,
-        Err(_) => {
-            return Response::builder()
-                .status(500)
-                .body(axum::body::Body::from("Error forwarding the request"))
-                .unwrap();
+        #[derive(Debug, Serialize, Deserialize)]
+        struct SFConfig {
+            servers: Vec<ServerEntry>,
+            #[serde(flatten)]
+            misc: HashMap<String, serde_json::Value>,
         }
-    };
 
-    // Stream the response back to the client
-    let status = response.status();
-    let headers = response.headers().clone();
+        #[derive(Debug, Serialize, Deserialize)]
+        struct ServerEntry {
+            i: i64,
+            d: String,
+            c: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            md: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            m: Option<String>,
+        }
 
-    let out_stream = response.bytes_stream();
+        config.servers.clear();
 
-    let mut builder = Response::builder().status(status);
-    for (key, value) in headers.iter() {
-        builder = builder.header(key, value);
+        let db = get_db().await.unwrap();
+
+        let servers = sqlx::query!("SELECT * FROM SERVER")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+
+        for server in servers {
+            let server_host = req
+                .uri()
+                .authority()
+                .map(|a| a.as_str())
+                .unwrap_or("localhost");
+            let server_url = if !server.ident.is_empty() {
+                format!("{}.{server_host}", server.ident)
+            } else {
+                server_host.to_string()
+            };
+
+            config.servers.push(ServerEntry {
+                i: server.ID * 2,
+                d: server_url.clone(),
+                c: "fu".into(),
+                md: None,
+                m: None,
+            });
+            // config.servers.push(ServerEntry {
+            //     i: server.ID * 2 + 1,
+            //     d: "This server is powered by: ".to_string(),
+            //     c: "github.com/the-marenga/sf-server".into(),
+            //     md: Some(server_url),
+            //     m: Some("2023-09-07 19:59:59".into()),
+            // });
+        }
+
+        Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::new(
+                serde_json::to_string(&config).unwrap(),
+            ))
+            .unwrap()
+    } else {
+        let resp = client.get(target_url).send().await.unwrap();
+        let mut builder = Response::builder().status(resp.status());
+        for (key, value) in resp.headers().iter() {
+            builder = builder.header(key, value);
+        }
+        let out_stream = resp.bytes_stream();
+        builder
+            .body(axum::body::Body::from_stream(out_stream))
+            .unwrap()
     }
-    builder
-        .body(axum::body::Body::from_stream(out_stream))
-        .unwrap()
 }
 
 pub mod misc;
@@ -132,7 +255,7 @@ pub mod response;
 const DEFAULT_CRYPTO_ID: &str = "0-00000000000000";
 const DEFAULT_SESSION_ID: &str = "00000000000000000000000000000000";
 const DEFAULT_CRYPTO_KEY: &str = "[_/$VV&*Qg&)r?~g";
-const SERVER_VERSION: u32 = 2007;
+const SERVER_VERSION: u32 = 2008;
 
 pub async fn get_db() -> Result<sqlx::Pool<Sqlite>, ServerError> {
     use async_once_cell::OnceCell;
@@ -316,7 +439,7 @@ async fn handle_command<'a>(
     if player_id < 0
         && ![
             "AccountCreate", "AccountLogin", "AccountCheck", "AccountDelete",
-            "PlayerHelpshiftAuthtoken",
+            "PlayerHelpshiftAuthtoken", "getserverversion",
         ]
         .contains(&command_name)
     {
@@ -1227,6 +1350,37 @@ async fn handle_command<'a>(
         }
         "Poll" => {
             Ok(player_poll(player_id, "poll", &db, Default::default()).await?)
+        }
+        "getserverversion" => {
+            let res = sqlx::query!(
+                "SELECT
+                (SELECT COUNT(*) FROM Character WHERE server = $1) as \
+                 `playercount!: i64`,
+                    (SELECT COUNT(*) FROM Guild WHERE server = $1) as \
+                 `guildcount!: i64`
+                    ",
+                server_id
+            )
+            .fetch_one(&db)
+            .await?;
+
+            ResponseBuilder::default()
+                .add_key("serverversion")
+                .add_val(SERVER_VERSION)
+                .add_key("preregister")
+                .add_val(now())
+                .add_val(now())
+                .add_str("Europe")
+                .add_str("Berlin")
+                .add_key("timestamp")
+                .add_val(now())
+                .add_key("rankmaxplayer")
+                .add_val(res.playercount)
+                .add_key("rankmaxgroup")
+                .add_val(res.guildcount)
+                .add_key("country")
+                .add_val("DE")
+                .build()
         }
         "UserSettingsUpdate" => Ok(ServerResponse::Success),
         "PlayerWhisper" => {
