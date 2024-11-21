@@ -1,7 +1,6 @@
 /target
-.env
-.cargo
 .DS_Store
 *.db
+*.db-*
 items
 values

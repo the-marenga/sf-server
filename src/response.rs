@@ -8,14 +8,6 @@ use thiserror::Error;
 
 use crate::RawItem;
 
-#[derive(Debug, serde::Deserialize)]
-#[allow(unused)]
-pub struct Request {
-    pub req: String,
-    rnd: f32,
-    c: u32,
-}
-
 pub enum ServerResponse {
     Success,
     Data(String),
@@ -44,7 +36,7 @@ pub enum ServerError {
     #[error("cannot do this right now2")]
     NotRightNow2,
     #[error("internal server error: {0}")]
-    DBError(#[from] libsql::Error),
+    DBError(#[from] sqlx::Error),
     #[error("internal server error")]
     Internal,
 }
