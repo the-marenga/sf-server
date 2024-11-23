@@ -65,10 +65,8 @@ impl ResponseBuilder {
         &mut self,
         name: impl AsRef<str>,
     ) -> &mut ResponseBuilder {
-        for _ in 0..12 {
-            self.add_val(0);
-        }
-
+        // NOTE: This function kills performance for obvious reasons. Remove
+        // this, if you want to do benchmarks
         let path = format!("items/{}.json", name.as_ref());
         let Some(weapon) = std::fs::read_to_string(&path)
             .ok()
