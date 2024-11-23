@@ -8,22 +8,19 @@ use std::{
 };
 
 use axum::{
-    extract::{FromRef, Host, Query, Request},
+    extract::{Host, Query, Request},
     handler::HandlerWithoutStateExt,
     http::{Method, Uri},
     response::{IntoResponse, Redirect, Response},
     routing::get,
-    Json, Router,
+    Router,
 };
 use base64::Engine;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use misc::{from_sf_string, to_sf_string};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use reqwest::{
-    header::{CONTENT_TYPE, LOCATION},
-    StatusCode,
-};
+use reqwest::{header::CONTENT_TYPE, StatusCode};
 use serde::{Deserialize, Serialize};
 use sf_api::{
     command::AttributeType,
@@ -80,7 +77,7 @@ async fn main() {
         .layer(cors);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], ports.https));
-    debug!("listening on {}", addr);
+    println!("listening on https://{}", addr);
     axum_server::bind_rustls(addr, config)
         .serve(app.into_make_service())
         .await
@@ -139,7 +136,7 @@ pub async fn forward(req: Request) -> Response {
         return Redirect::temporary(&target_url).into_response();
     }
 
-    info!("Intercepted: {uri}");
+    // info!("Intercepted: {uri}");
 
     let client = reqwest::Client::new();
 
@@ -158,7 +155,7 @@ pub async fn forward(req: Request) -> Response {
             .unwrap()
     } else if uri.ends_with(".framework.js.gz") {
         let target_url = format!("https://cdn.playa-games.com{uri}");
-        info!("Forwarded: {target_url}");
+        // info!("Rewrote: {target_url}");
         let resp = client.get(target_url).send().await.unwrap();
         let raw = resp.text().await.unwrap();
 
@@ -196,7 +193,7 @@ pub async fn forward(req: Request) -> Response {
 
         let db = get_db().await.unwrap();
 
-        let servers = sqlx::query!("SELECT * FROM SERVER")
+        let servers = sqlx::query!("SELECT * FROM world")
             .fetch_all(&db)
             .await
             .unwrap();
@@ -214,7 +211,7 @@ pub async fn forward(req: Request) -> Response {
             };
 
             config.servers.push(ServerEntry {
-                i: server.ID * 2,
+                i: server.world_id * 2,
                 d: server_url.clone(),
                 c: "fu".into(),
                 md: None,
@@ -312,34 +309,53 @@ async fn handle_cmd(
     let command_args =
         String::from_utf8(command_args).map_err(|_| ServerError::BadRequest)?;
 
-    let (player_id, server_id) = match crypto_id == DEFAULT_CRYPTO_ID {
-        true => (-1, -1),
+    let world = "";
+
+    let session = match crypto_id == DEFAULT_CRYPTO_ID {
+        true => {
+            let world_id = sqlx::query_scalar!(
+                "SELECT world_id
+                     FROM world
+                     WHERE ident = $1",
+                world
+            )
+            .fetch_one(&db)
+            .await
+            .map_err(ServerError::DBError)?;
+
+            Session::new_unauthed(world_id)
+        }
         false => {
             let res = sqlx::query!(
-                "SELECT character.id, character.server
-                 FROM character
-                 LEFT JOIN Logindata on logindata.id = character.logindata
-                 WHERE cryptoid = $1",
-                crypto_id
+                "SELECT character.pid, crypto_key, session_id, crypto_id, \
+                 world_id, login_count
+                     FROM character
+                     NATURAL JOIN session
+                     NATURAL JOIN world
+                     WHERE crypto_id = $1 AND world.ident = $2",
+                crypto_id,
+                world
             )
             .fetch_optional(&db)
             .await
             .map_err(ServerError::DBError)?;
 
             match res {
-                Some(row) => {
-                    let id = row.ID;
-                    let server_id = row.server;
-                    (id, server_id)
-                }
+                Some(row) => Session {
+                    player_id: row.pid,
+                    world_id: row.world_id,
+                    session_id: row.session_id,
+                    crypto_id: row.crypto_id,
+                    crypto_key: row.crypto_key,
+                    login_count: row.login_count,
+                },
                 None => Err(ServerError::InvalidAuth)?,
             }
         }
     };
-    let command_args: Vec<_> = command_args.split('/').collect();
-    let args = CommandArguments(command_args);
+    let args = CommandArguments(command_args.split('/').collect());
 
-    handle_command(db, command_name, args, player_id, server_id)
+    handle_command(db, command_name, args, session)
         .await
         .map_err(|a| a.into())
         .map(|a| a.into())
@@ -362,51 +378,66 @@ async fn handle_req(
         Err(ServerError::BadRequest)?;
     }
 
-    let (player_id, crypto_key, server_id) =
-        match crypto_id == DEFAULT_CRYPTO_ID {
-            true => (-1, DEFAULT_CRYPTO_KEY.to_string(), -1),
-            false => {
-                let res = sqlx::query!(
-                    "SELECT character.id, cryptokey, character.server
+    // TODO: Parse from request url
+    let world = "";
+
+    let session = match crypto_id == DEFAULT_CRYPTO_ID {
+        true => {
+            let world_id = sqlx::query_scalar!(
+                "SELECT world_id
+                     FROM world
+                     WHERE ident = $1",
+                world
+            )
+            .fetch_one(&db)
+            .await
+            .map_err(ServerError::DBError)?;
+
+            Session::new_unauthed(world_id)
+        }
+        false => {
+            let res = sqlx::query!(
+                "SELECT character.pid, crypto_key, session_id, crypto_id, \
+                 world_id, login_count
                      FROM character
-                     LEFT JOIN Logindata on logindata.id = character.logindata
-                     WHERE cryptoid = ?1",
-                    crypto_id,
-                )
-                .fetch_optional(&db)
-                .await
-                .map_err(ServerError::DBError)?;
+                     NATURAL JOIN session
+                     NATURAL JOIN world
+                     WHERE crypto_id = $1 AND world.ident = $2",
+                crypto_id,
+                world
+            )
+            .fetch_optional(&db)
+            .await
+            .map_err(ServerError::DBError)?;
 
-                match res {
-                    Some(row) => {
-                        let id = row.ID;
-                        let cryptokey = row.CryptoKey;
-                        let server_id = row.server;
-                        (id, cryptokey, server_id)
-                    }
-                    None => Err(ServerError::InvalidAuth)?,
-                }
+            match res {
+                Some(row) => Session {
+                    player_id: row.pid,
+                    world_id: row.world_id,
+                    session_id: row.session_id,
+                    crypto_id: row.crypto_id,
+                    crypto_key: row.crypto_key,
+                    login_count: row.login_count,
+                },
+                None => Err(ServerError::InvalidAuth)?,
             }
-        };
+        }
+    };
 
-    let request = decrypt_server_request(encrypted_request, &crypto_key);
+    let request =
+        decrypt_server_request(encrypted_request, &session.crypto_key);
 
-    if request.len() < DEFAULT_SESSION_ID.len() + 5 {
-        Err(ServerError::BadRequest)?;
-    }
-
-    let (_session_id, request) = request.split_at(DEFAULT_SESSION_ID.len());
-    // TODO: Validate session id
+    let Some((_session_id, request)) = request.split_once('|') else {
+        return Err(ServerError::BadRequest)?;
+    };
 
     let request = request.trim_matches('|');
 
     let (command_name, command_args) = request.split_once(':').unwrap();
-    if command_name != "Poll" {
-        println!("Received: {command_name}: {}", command_args);
-    }
     let command_args: Vec<_> = command_args.split('/').collect();
     let args = CommandArguments(command_args);
-    handle_command(db, command_name, args, player_id, server_id)
+
+    handle_command(db, command_name, args, session)
         .await
         .map_err(|a| a.into())
         .map(|a| a.into())
@@ -422,33 +453,61 @@ impl<T> OptionGet<T> for Option<T> {
     }
 }
 
+#[derive(Debug)]
+struct Session {
+    player_id: i64,
+    world_id: i64,
+    session_id: String,
+    crypto_id: String,
+    crypto_key: String,
+    login_count: i64,
+}
+
+impl Session {
+    pub fn new_unauthed(world_id: i64) -> Self {
+        Self {
+            player_id: -1,
+            world_id,
+            session_id: DEFAULT_SESSION_ID.to_string(),
+            crypto_id: DEFAULT_CRYPTO_ID.to_string(),
+            crypto_key: DEFAULT_CRYPTO_KEY.to_string(),
+            login_count: 1,
+        }
+    }
+
+    pub fn can_request(&self, command: &str) -> bool {
+        self.player_id > 0
+            || [
+                "AccountCreate", "AccountLogin", "AccountCheck",
+                "AccountDelete", "PlayerHelpshiftAuthtoken",
+                "getserverversion", "PlayerWhisper",
+            ]
+            .contains(&command)
+    }
+}
+
 async fn handle_command<'a>(
     db: sqlx::Pool<Sqlite>,
     command_name: &'a str,
     args: CommandArguments<'a>,
-    player_id: i64,
-    server_id: i64,
+    session: Session,
 ) -> Result<ServerResponse, ServerError> {
-    // TODO: validate req header session id & player_id
+    let mut rng = fastrand::Rng::new();
 
     if command_name != "Poll" {
         println!("Received: {command_name}: {:?}", args);
     }
-    let mut rng = fastrand::Rng::new();
 
-    if player_id < 0
-        && ![
-            "AccountCreate", "AccountLogin", "AccountCheck", "AccountDelete",
-            "PlayerHelpshiftAuthtoken", "getserverversion",
-        ]
-        .contains(&command_name)
-    {
+    if !session.can_request(command_name) {
+        // TODO: Validate provided session id
         println!("{command_name} requires auth");
         Err(ServerError::InvalidAuth)?;
     }
 
     match command_name {
-        "PlayerSetFace" => player_set_face(&args, &db, player_id).await,
+        "PlayerSetFace" => {
+            character_set_face(&args, &db, session.player_id).await
+        }
         "AccountCreate" => {
             let name = args.get_str(0, "name")?;
             let password = args.get_str(1, "password")?;
@@ -489,18 +548,6 @@ async fn handle_command<'a>(
 
             let mut tx = db.begin().await?;
 
-            let login_id = sqlx::query_scalar!(
-                "INSERT INTO LOGINDATA (mail, pwhash, SessionID, CryptoID, \
-                 CryptoKey) VALUES ($1, $2, $3, $4, $5) returning ID",
-                mail,
-                hashed_password,
-                session_id,
-                crypto_id,
-                crypto_key
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-
             let mut quests = [0; 3];
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
@@ -520,9 +567,9 @@ async fn handle_command<'a>(
                 quests[i] = res;
             }
 
-            let tavern_id = sqlx::query_scalar!(
-                "INSERT INTO TAVERN (quest1, quest2, quest3)
-                    VALUES ($1, $2, $3) returning ID",
+            let pid = sqlx::query_scalar!(
+                "INSERT INTO tavern (quest1, quest2, quest3)
+                    VALUES ($1, $2, $3) returning pid",
                 quests[0],
                 quests[1],
                 quests[2]
@@ -530,11 +577,9 @@ async fn handle_command<'a>(
             .fetch_one(&mut *tx)
             .await?;
 
-            let bag_id = sqlx::query_scalar!(
-                "INSERT INTO BAG (pos1) VALUES (NULL) returning ID",
-            )
-            .fetch_one(&mut *tx)
-            .await?;
+            sqlx::query_scalar!("INSERT INTO BAG (pid) VALUES ($1)", pid)
+                .execute(&mut *tx)
+                .await?;
 
             let attr_id = sqlx::query_scalar!(
                 "INSERT INTO Attributes
@@ -562,10 +607,10 @@ async fn handle_command<'a>(
             .fetch_one(&mut *tx)
             .await?;
 
-            let portrait_id = sqlx::query_scalar!(
+            sqlx::query!(
                 "INSERT INTO PORTRAIT (Mouth, Hair, Brows, Eyes, Beards, \
-                 Nose, Ears, Horns, extra) VALUES ($1, $2, $3, $4, $5, $6, \
-                 $7, $8, $9) returning ID",
+                 Nose, Ears, Horns, extra, pid) VALUES ($1, $2, $3, $4, $5, \
+                 $6, $7, $8, $9, $10)",
                 portrait.mouth,
                 portrait.hair,
                 portrait.eyebrows,
@@ -574,40 +619,50 @@ async fn handle_command<'a>(
                 portrait.nose,
                 portrait.ears,
                 portrait.horns,
-                portrait.extra
+                portrait.extra,
+                pid
             )
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await?;
 
-            let activity_id = sqlx::query_scalar!(
-                "INSERT INTO Activity (typ) VALUES (0) RETURNING ID",
-            )
-            .fetch_one(&mut *tx)
-            .await?;
+            sqlx::query!("INSERT INTO Activity (pid) VALUES ($1)", pid)
+                .execute(&mut *tx)
+                .await?;
 
-            let equip_id = sqlx::query_scalar!(
-                "INSERT INTO Equipment (hat) VALUES (null) RETURNING ID",
+            sqlx::query!("INSERT INTO Equipment (pid) VALUES ($1)", pid)
+                .execute(&mut *tx)
+                .await?;
+
+            sqlx::query!("INSERT INTO guild_upgrade (pid) VALUES ($1)", pid)
+                .execute(&mut *tx)
+                .await?;
+
+            sqlx::query!(
+                "INSERT INTO character (pid, world_id, pw_hash, name, class, \
+                 race, gender, attributes, attributes_bought, mail, \
+                 crypto_key)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                pid,
+                session.world_id,
+                hashed_password,
+                name,
+                class,
+                race,
+                gender,
+                attr_id,
+                attr_upgrades,
+                mail,
+                crypto_key
             )
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await?;
 
             sqlx::query!(
-                "INSERT INTO Character
-                    (Name, Class, Attributes, AttributesBought, LoginData,
-                    Tavern, Bag, Portrait, Gender, Race, Activity, Equipment)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-                name,
-                class,
-                attr_id,
-                attr_upgrades,
-                login_id,
-                tavern_id,
-                bag_id,
-                portrait_id,
-                gender,
-                race,
-                activity_id,
-                equip_id
+                "INSERT INTO SESSION (pid, session_id, crypto_id) VALUES ($1, \
+                 $2, $3)",
+                pid,
+                session_id,
+                crypto_id,
             )
             .execute(&mut *tx)
             .await?;
@@ -627,16 +682,15 @@ async fn handle_command<'a>(
             let mut tx = db.begin().await?;
 
             let info = sqlx::query!(
-                "SELECT character.id, pwhash, character.logindata FROM
-                      character LEFT JOIN logindata on logindata.id =
-                      character.logindata WHERE lower(name) = lower($1)",
+                "SELECT pid, pw_hash, crypto_key FROM
+                character WHERE lower(name) = lower($1)",
                 name
             )
             .fetch_one(&mut *tx)
             .await?;
-            let id = info.ID;
-            let pwhash = info.PWHash.unwrap_or_default();
-            let logindata = info.LoginData;
+
+            let pid = info.pid;
+            let pwhash = info.pw_hash;
 
             let correct_full_hash =
                 sha1_hash(&format!("{}{login_count}", pwhash));
@@ -655,10 +709,9 @@ async fn handle_command<'a>(
             }
 
             sqlx::query!(
-                "UPDATE logindata
-                SET sessionid = $2, cryptoid = $3
-                WHERE id = $1",
-                logindata,
+                "INSERT INTO session (pid, session_id, crypto_id)
+                VALUES ($1, $2, $3)",
+                pid,
                 session_id,
                 crypto_id,
             )
@@ -667,7 +720,15 @@ async fn handle_command<'a>(
 
             tx.commit().await?;
 
-            player_poll(id, "accountlogin", &db, Default::default()).await
+            let mut session = session;
+            session.crypto_id = crypto_id;
+            session.crypto_key = info.crypto_key;
+            session.session_id = session_id;
+            session.player_id = pid;
+            session.login_count = 1;
+
+            character_poll(session, "accountlogin", &db, Default::default())
+                .await
         }
         "AccountSetLanguage" => {
             // NONE
@@ -677,12 +738,12 @@ async fn handle_command<'a>(
             let description = args.get_str(0, "description")?;
             let description = from_sf_string(description);
             sqlx::query!(
-                "UPDATE Character SET description = $1 WHERE id = $2",
-                description, player_id
+                "UPDATE character SET description = $1 WHERE pid = $2",
+                description, session.player_id
             )
             .execute(&db)
             .await?;
-            Ok(player_poll(player_id, "", &db, Default::default()).await?)
+            Ok(character_poll(session, "", &db, Default::default()).await?)
         }
         "PlayerHelpshiftAuthtoken" => ResponseBuilder::default()
             .add_key("helpshiftauthtoken")
@@ -729,18 +790,18 @@ async fn handle_command<'a>(
                     g.name,
                     c.name as leader,
                     g.honor,
-                    (SELECT count(*) AS membercount FROM guildmember WHERE \
-                 guild = g.id) as `membercount!: i64`,
+                    (SELECT count(*) AS membercount FROM guild_member as gm \
+                 WHERE gm.guild_id = g.id) as `membercount!: i64`,
                     g.attacking
-                    FROM GUILD as g
-                    LEFT JOIN guildmember as gm on gm.guild = g.id
-                    LEFT JOIN character as c on gm.id = c.guild
-                    WHERE g.server = $3 AND RANK = 3
+                    FROM guild as g
+                    JOIN guild_member as gm on gm.guild_id = g.id
+                    NATURAL JOIN character as c
+                    WHERE g.world_id = $3 AND RANK = 3
                     ORDER BY g.honor desc, g.id asc
                     LIMIT $2 OFFSET $1",
                 offset,
                 limit,
-                server_id
+                session.world_id
             )
             .fetch_all(&db)
             .await?;
@@ -751,11 +812,11 @@ async fn handle_command<'a>(
                     .write_fmt(format_args!(
                         "{},{},{},{},{},{};",
                         entry_idx,
-                        guild.Name,
+                        guild.name,
                         guild.leader,
-                        guild.Honor,
+                        guild.honor,
                         guild.membercount,
-                        guild.Attacking.map_or(0, |_| 1),
+                        guild.attacking.map_or(0, |_| 1),
                     ))
                     .unwrap();
             }
@@ -777,26 +838,24 @@ async fn handle_command<'a>(
                     let name = name?;
                     sqlx::query_scalar!(
                         "WITH selected_character AS
-                            (SELECT honor,
-                                    id
-                            FROM CHARACTER
-                            WHERE name = $1
-                                AND server = $2)
+                            (SELECT honor, pid
+                            FROM character
+                            WHERE name = $1 AND world_id = $2)
                         SELECT
                             (SELECT count(*)
-                            FROM CHARACTER
-                            WHERE server = $2
+                            FROM character
+                            WHERE world_id = $2
                                 AND honor >
                                 (SELECT honor
                                 FROM selected_character)
                                 OR (honor =
                                     (SELECT honor
                                     FROM selected_character)
-                                    AND id <=
-                                    (SELECT id
+                                    AND pid <=
+                                    (SELECT pid
                                     FROM selected_character))) AS rank",
                         name,
-                        server_id
+                        session.world_id
                     )
                     .fetch_one(&db)
                     .await?
@@ -808,28 +867,28 @@ async fn handle_command<'a>(
 
             let res = sqlx::query!(
                 "SELECT name, level, honor, class
-                     FROM CHARACTER
-                     WHERE server = $3
-                     ORDER BY honor desc, id asc
+                     FROM character
+                     WHERE world_id = $3
+                     ORDER BY honor desc, pid asc
                      LIMIT $2 OFFSET $1",
                 offset,
                 limit,
-                server_id,
+                session.world_id,
             )
             .fetch_all(&db)
             .await?;
 
-            let mut players = String::new();
-            for (entry_idx, player) in res.into_iter().enumerate() {
-                players
+            let mut characters = String::new();
+            for (entry_idx, character) in res.into_iter().enumerate() {
+                characters
                     .write_fmt(format_args!(
                         "{},{},{},{},{},{},{};",
                         offset + entry_idx as i64 + 1,
-                        player.Name,
+                        character.name,
                         "",
-                        player.Level,
-                        player.Honor,
-                        player.Class,
+                        character.level,
+                        character.honor,
+                        character.class,
                         "bg"
                     ))
                     .unwrap();
@@ -837,7 +896,7 @@ async fn handle_command<'a>(
 
             ResponseBuilder::default()
                 .add_key("Ranklistplayer.r")
-                .add_str(&players)
+                .add_str(&characters)
                 .build()
         }
         "AccountDelete" => {
@@ -853,9 +912,8 @@ async fn handle_command<'a>(
             let mut tx = db.begin().await?;
 
             let res = sqlx::query!(
-                "SELECT character.id, pwhash
+                "SELECT pid, pw_hash
                     FROM character
-                    LEFT JOIN logindata on logindata.id = character.logindata
                     WHERE lower(name) = lower($1) and mail = $2",
                 name,
                 mail,
@@ -867,14 +925,17 @@ async fn handle_command<'a>(
                 return Ok(ServerResponse::Success);
             };
 
-            let id = char.ID;
-            let pwhash = char.PWHash;
+            let id = char.pid;
+            let pwhash = char.pw_hash;
             let correct_full_hash =
                 sha1_hash(&format!("{}{login_count}", pwhash));
             if correct_full_hash != full_hash {
                 return Err(ServerError::WrongPassword);
             }
-            sqlx::query!("DELETE FROM character WHERE id = $1", id)
+
+            // FIXME: Pick another guild leader
+
+            sqlx::query!("DELETE FROM character WHERE pid = $1", id)
                 .execute(&mut *tx)
                 .await?;
 
@@ -898,13 +959,14 @@ async fn handle_command<'a>(
             let mut silver = args.get_int(0, "gold value")?;
 
             let mut tx = db.begin().await?;
-            let player_silver = sqlx::query_scalar!(
-                "SELECT silver FROM character where id = $1", player_id,
+            let character_silver = sqlx::query_scalar!(
+                "SELECT silver FROM character where pid = $1",
+                session.player_id,
             )
             .fetch_one(&mut *tx)
             .await?;
 
-            if silver < 0 || player_silver < silver {
+            if silver < 0 || character_silver < silver {
                 return Err(ServerError::BadRequest);
             }
 
@@ -913,11 +975,11 @@ async fn handle_command<'a>(
             } else {
                 silver = -silver;
             }
-            let new_silver = player_silver + silver;
+            let new_silver = character_silver + silver;
 
             sqlx::query!(
-                "UPDATE character SET silver = $1 WHERE id = $2", new_silver,
-                player_id,
+                "UPDATE character SET silver = $1 WHERE pid = $2", new_silver,
+                session.player_id,
             )
             .execute(&mut *tx)
             .await?;
@@ -943,32 +1005,29 @@ async fn handle_command<'a>(
                 "SELECT
                 typ,
                 mount,
-                mountend,
-
+                mount_end,
                 q1.length as ql1,
                 q2.Length as ql2,
                 q3.length as ql3,
-
-                activity.id as activityid,
-                character.tavern as tavern_id,
                 tfa
-
-                FROM character JOIN activity ON activity.id = \
-                 character.activity JOIN TAVERN on character.tavern = \
-                 tavern.id JOIN Quest as q1 on q1.id = tavern.Quest1 JOIN \
-                 Quest as q2 on q2.id = tavern.Quest2 JOIN Quest as q3 on \
-                 q3.id = tavern.Quest3 WHERE character.id = $1",
-                player_id,
+                FROM character
+                NATURAL JOIN activity
+                NATURAL JOIN TAVERN
+                    JOIN Quest as q1 on q1.id = tavern.Quest1
+                    JOIN Quest as q2 on q2.id = tavern.Quest2
+                    JOIN Quest as q3 on q3.id = tavern.Quest3
+                WHERE pid = $1",
+                session.player_id,
             )
             .fetch_one(&mut *tx)
             .await?;
 
-            if row.Typ != 0 {
+            if row.typ != 0 {
                 return Err(ServerError::StillBusy);
             }
 
-            let mut mount = row.Mount;
-            let mut mount_end = row.MountEnd;
+            let mut mount = row.mount;
+            let mut mount_end = row.mount_end;
             let mount_effect = effective_mount(&mut mount_end, &mut mount);
 
             let quest_length = match quest {
@@ -979,9 +1038,7 @@ async fn handle_command<'a>(
                 * mount_effect.ceil().max(0.0);
 
             let quest_length = quest_length as i64;
-            let activity_id = row.activityid;
-            let tavern_id = row.tavern_id;
-            let tfa = row.TFA;
+            let tfa = row.tfa;
 
             if tfa < quest_length {
                 // TODO: Actual error
@@ -989,9 +1046,13 @@ async fn handle_command<'a>(
             }
             let busy_until = in_seconds(quest_length);
             sqlx::query!(
-                "UPDATE activity SET TYP = 2, SUBTYP = $2, BUSYUNTIL = $3, \
-                 STARTED = CURRENT_TIMESTAMP WHERE id = $1",
-                activity_id,
+                "UPDATE activity
+                    SET typ = 2,
+                    sub_type = $2,
+                    busy_until = $3,
+                    started = CURRENT_TIMESTAMP
+                WHERE pid = $1",
+                session.player_id,
                 quest,
                 busy_until
             )
@@ -1001,10 +1062,10 @@ async fn handle_command<'a>(
             // TODO: We should keep track of how much we deduct here, so that
             // we can accurately refund this on cancel
             sqlx::query!(
-                "UPDATE tavern as t
+                "UPDATE tavern
                  SET tfa = max(0, tfa - $2)
-                 WHERE t.id = $1",
-                tavern_id,
+                 WHERE pid = $1",
+                session.player_id,
                 quest_length
             )
             .execute(&mut *tx)
@@ -1012,40 +1073,40 @@ async fn handle_command<'a>(
 
             tx.commit().await?;
 
-            player_poll(player_id, "", &db, Default::default()).await
+            character_poll(session, "", &db, Default::default()).await
         }
         "PlayerAdventureFinished" => {
             let mut tx = db.begin().await?;
 
             let row = sqlx::query!(
                 "SELECT
-                        activity.typ,
-                        activity.busyuntil,
-                        activity.subtyp,
+                    activity.typ,
+                    activity.busy_until,
+                    activity.sub_type,
 
-                        q1.item as q1item,
-                        q1.length as q1length,
-                        q1.Location as q1location,
-                        q1.Monster as q1monster,
-                        q1.Mushrooms as q1mush,
-                        q1.Silver as q1silver,
-                        q1.XP as q1xp,
+                    q1.item as q1item,
+                    q1.length as q1length,
+                    q1.Location as q1location,
+                    q1.Monster as q1monster,
+                    q1.Mushrooms as q1mush,
+                    q1.Silver as q1silver,
+                    q1.XP as q1xp,
 
-                        q2.item as q2item,
-                        q2.length as q2length,
-                        q2.Location as q2location,
-                        q2.Monster as q2monster,
-                        q2.Mushrooms as q2mush,
-                        q2.SILVER as q2silver,
-                        q2.XP as q2xp,
+                    q2.item as q2item,
+                    q2.length as q2length,
+                    q2.Location as q2location,
+                    q2.Monster as q2monster,
+                    q2.Mushrooms as q2mush,
+                    q2.SILVER as q2silver,
+                    q2.XP as q2xp,
 
-                        q3.item as q3item,
-                        q3.length as q3length,
-                        q3.Location as q3location,
-                        q3.Monster as q3monster,
-                        q3.Mushrooms as q3mush,
-                        q3.SILVER as q3silver,
-                        q3.XP as q3xp,
+                    q3.item as q3item,
+                    q3.length as q3length,
+                    q3.Location as q3location,
+                    q3.Monster as q3monster,
+                    q3.Mushrooms as q3mush,
+                    q3.SILVER as q3silver,
+                    q3.XP as q3xp,
 
                     level,
                     name,
@@ -1060,38 +1121,37 @@ async fn handle_command<'a>(
                     portrait.extra,
                     portrait.horns,
 
-                    character.race,
-                    character.gender,
-                    character.class,
-
-                    activity.id as activity_id,
-
+                    race,
+                    gender,
+                    class,
                     experience,
                     portrait.influencer
 
-                     FROM CHARACTER JOIN PORTRAIT ON character.portrait = \
-                 portrait.id JOIN tavern on tavern.id = character.tavern JOIN \
-                 quest as q1 on tavern.quest1 = q1.id JOIN quest as q2 on \
-                 tavern.quest2 = q2.id JOIN quest as q3 on tavern.quest2 = \
-                 q3.id JOIN ACTIVITY ON activity.id = character.activity \
-                 WHERE character.id = $1",
-                player_id,
+                    FROM character
+                      NATURAL JOIN PORTRAIT
+                      NATURAL JOIN tavern
+                      NATURAL JOIN activity
+                      JOIN quest as q1 on tavern.quest1 = q1.id
+                      JOIN quest as q2 on tavern.quest2 = q2.id
+                      JOIN quest as q3 on tavern.quest2 = q3.id
+                      WHERE pid = $1",
+                session.player_id,
             )
             .fetch_one(&mut *tx)
             .await?;
 
-            if row.Typ != 2 {
+            if row.typ != 2 {
                 // We are not actually questing
                 return Err(ServerError::StillBusy);
             }
-            let busyuntil = row.BusyUntil;
+            let busyuntil = row.busy_until;
 
             if busyuntil > now() {
                 // Quest is still going
                 return Err(ServerError::StillBusy);
             }
 
-            let subtyp = row.SubTyp;
+            let subtyp = row.sub_type;
 
             let (_item, location, monster, mush, silver, quest_xp) =
                 match subtyp {
@@ -1128,22 +1188,22 @@ async fn handle_command<'a>(
 
             resp.add_key("fightheader.fighters");
             let monster_id = -monster;
-            let mut player_lvl = row.Level;
-            let starting_player_xp = row.Experience;
+            let mut character_lvl = row.level;
+            let starting_character_xp = row.experience;
 
-            let mut total_xp = quest_xp + starting_player_xp;
-            let mut required_xp = xp_for_next_level(player_lvl);
-            // Level up the player
+            let mut total_xp = quest_xp + starting_character_xp;
+            let mut required_xp = xp_for_next_level(character_lvl);
+            // Level up the character
             while total_xp > required_xp {
-                player_lvl += 1;
+                character_lvl += 1;
                 total_xp -= required_xp;
-                required_xp = xp_for_next_level(player_lvl);
+                required_xp = xp_for_next_level(character_lvl);
             }
 
-            let player_attributes = [1, 1, 1, 1, 1];
+            let character_attributes = [1, 1, 1, 1, 1];
             let monster_attributes = [1, 1, 1, 1, 1];
             let monster_hp = 10_000;
-            let player_hp = 10_000;
+            let character_hp = 10_000;
 
             resp.add_val(1);
             resp.add_val(0);
@@ -1153,31 +1213,31 @@ async fn handle_command<'a>(
             resp.add_val(location);
 
             resp.add_val(1);
-            resp.add_val(player_id);
-            resp.add_str(&row.Name);
-            resp.add_val(player_lvl);
+            resp.add_val(session.player_id);
+            resp.add_str(&row.name);
+            resp.add_val(character_lvl);
             for _ in 0..2 {
-                resp.add_val(player_hp);
+                resp.add_val(character_hp);
             }
-            for val in player_attributes {
+            for val in character_attributes {
                 resp.add_val(val);
             }
 
-            resp.add_val(row.Mouth);
-            resp.add_val(row.Hair);
-            resp.add_val(row.Brows);
-            resp.add_val(row.Eyes);
-            resp.add_val(row.Beards);
-            resp.add_val(row.Nose);
-            resp.add_val(row.Ears);
-            resp.add_val(row.Extra);
-            resp.add_val(row.Horns);
+            resp.add_val(row.mouth);
+            resp.add_val(row.hair);
+            resp.add_val(row.brows);
+            resp.add_val(row.eyes);
+            resp.add_val(row.beards);
+            resp.add_val(row.nose);
+            resp.add_val(row.ears);
+            resp.add_val(row.extra);
+            resp.add_val(row.horns);
 
-            resp.add_val(row.Influencer); // special influencer portraits
+            resp.add_val(row.influencer); // special influencer portraits
 
-            resp.add_val(row.Race); // race
-            resp.add_val(row.Gender); // gender
-            resp.add_val(row.Class); // class
+            resp.add_val(row.race); // race
+            resp.add_val(row.gender); // gender
+            resp.add_val(row.class); // class
 
             // Main weapon
             for _ in 0..12 {
@@ -1193,7 +1253,7 @@ async fn handle_command<'a>(
             for _ in 0..2 {
                 resp.add_val(monster_id);
             }
-            resp.add_val(player_lvl); // monster lvl
+            resp.add_val(character_lvl); // monster lvl
             resp.add_val(monster_hp);
             resp.add_val(monster_hp);
             for attr in monster_attributes {
@@ -1206,44 +1266,42 @@ async fn handle_command<'a>(
             resp.add_val(3); // Class?
 
             // Probably also items
-            // This means just changing the portrait into the player
+            // This means just changing the portrait into the character
             resp.add_val(-1);
             for _ in 0..23 {
                 resp.add_val(0);
             }
 
             resp.add_key("fight.r");
-            resp.add_str(&format!("{player_id},0,-1000"));
+            resp.add_str(&format!("{},0,-1000", session.player_id));
 
             // TODO: actually simulate fight
 
             resp.add_key("winnerid");
-            resp.add_val(player_id);
+            resp.add_val(session.player_id);
 
             resp.add_key("fightversion");
             resp.add_val(1);
 
-            let activity_id = row.activity_id;
-
             sqlx::query!(
-                "UPDATE activity as a
-                 SET typ = 0, subtyp = 0, started = 0, busyuntil = 0
-                 WHERE a.id = $1",
-                activity_id,
+                "UPDATE activity
+                 SET typ = 0, sub_type = 0, started = 0, busy_until = 0
+                 WHERE pid = $1",
+                session.player_id,
             )
             .execute(&mut *tx)
             .await?;
 
             sqlx::query!(
-                "UPDATE character as c
-                    SET silver = silver + $2, mushrooms = mushrooms + $3, \
-                 honor = honor + $4, level = $5, Experience = $6
-                 WHERE c.id = $1",
-                player_id,
+                "UPDATE character
+                 SET silver = silver + $2, mushrooms = mushrooms + $3, honor = \
+                 honor + $4, level = $5, Experience = $6
+                 WHERE pid = $1",
+                session.player_id,
                 silver,
                 mush,
                 honor_won,
-                player_lvl,
+                character_lvl,
                 total_xp
             )
             .execute(&mut *tx)
@@ -1253,7 +1311,7 @@ async fn handle_command<'a>(
 
             tx.commit().await?;
 
-            player_poll(player_id, "", &db, resp).await
+            character_poll(session, "", &db, resp).await
         }
         "PlayerMountBuy" => {
             todo!();
@@ -1264,10 +1322,10 @@ async fn handle_command<'a>(
             //     return INTERNAL_ERR;
             // };
 
-            // let Ok(player) = sqlx::query!(
+            // let Ok(character) = sqlx::query!(
             //     "SELECT silver, mushrooms, mount, mountend FROM CHARACTER \
             //      WHERE id = $1",
-            //     player_id
+            //     pid
             // )
             // .fetch_one(&mut *tx)
             // .await
@@ -1276,8 +1334,8 @@ async fn handle_command<'a>(
             //     return INTERNAL_ERR;
             // };
 
-            // let mut silver = player.silver;
-            // let mut mushrooms = player.mushrooms;
+            // let mut silver = character.silver;
+            // let mut mushrooms = character.mushrooms;
 
             // let price = match mount {
             //     0 => 0,
@@ -1306,8 +1364,8 @@ async fn handle_command<'a>(
             // silver -= price;
 
             // let now = Local::now().naive_local();
-            // let mount_start = match player.mountend {
-            //     Some(x) if player.mount == mount => now.max(x),
+            // let mount_start = match character.mountend {
+            //     Some(x) if character.mount == mount => now.max(x),
             //     _ => now,
             // };
 
@@ -1316,7 +1374,7 @@ async fn handle_command<'a>(
             //      $4, silver = $5 WHERE id = $3",
             //     mount,
             //     mount_start + Duration::from_secs(60 * 60 * 24 * 14),
-            //     player_id,
+            //     pid,
             //     mushrooms,
             //     silver,
             // )
@@ -1331,7 +1389,7 @@ async fn handle_command<'a>(
             // match tx.commit().await {
             //     Err(_) => INTERNAL_ERR,
             //     Ok(_) => {
-            //         player_poll(player_id, "", &db, Default::default()).await
+            //         character_poll(pid, "", &db, Default::default()).await
             //     }
             // }
         }
@@ -1341,25 +1399,25 @@ async fn handle_command<'a>(
                 Err(ServerError::BadRequest)?;
             }
             sqlx::query!(
-                "UPDATE CHARACTER SET tutorialstatus = $1 WHERE ID = $2",
-                status, player_id,
+                "UPDATE CHARACTER SET tutorial_status = $1 WHERE pid = $2",
+                status, session.player_id,
             )
             .execute(&db)
             .await?;
             Ok(ServerResponse::Success)
         }
-        "Poll" => {
-            Ok(player_poll(player_id, "poll", &db, Default::default()).await?)
-        }
+        "Poll" => Ok(
+            character_poll(session, "poll", &db, Default::default()).await?
+        ),
         "getserverversion" => {
             let res = sqlx::query!(
                 "SELECT
-                (SELECT COUNT(*) FROM Character WHERE server = $1) as \
-                 `playercount!: i64`,
-                    (SELECT COUNT(*) FROM Guild WHERE server = $1) as \
+                (SELECT COUNT(*) FROM Character WHERE world_id = $1) as \
+                 `charactercount!: i64`,
+                    (SELECT COUNT(*) FROM Guild WHERE world_id = $1) as \
                  `guildcount!: i64`
                     ",
-                server_id
+                session.world_id
             )
             .fetch_one(&db)
             .await?;
@@ -1375,7 +1433,7 @@ async fn handle_command<'a>(
                 .add_key("timestamp")
                 .add_val(now())
                 .add_key("rankmaxplayer")
-                .add_val(res.playercount)
+                .add_val(res.charactercount)
                 .add_key("rankmaxgroup")
                 .add_val(res.guildcount)
                 .add_key("country")
@@ -1388,20 +1446,32 @@ async fn handle_command<'a>(
             if name != "server" {
                 todo!()
             }
+
             let res =
                 CheatCmd::try_parse_from(args.get_str(1, "args")?.split(' '))
                     .map_err(|_| ServerError::BadRequest)?;
 
             match res.command {
+                Command::AddWorld { world_name } => {
+                    sqlx::query!(
+                        "INSERT INTO world (ident) VALUES ($1)", world_name
+                    )
+                    .execute(&db)
+                    .await?;
+                    return Ok(ServerResponse::Success);
+                }
+                _ if session.player_id == -1 => {
+                    return Err(ServerError::BadRequest);
+                }
                 Command::Level { level } => {
                     if level < 1 {
                         return Err(ServerError::BadRequest);
                     }
                     sqlx::query!(
                         "UPDATE character set level = $1, experience = 0 \
-                         WHERE id = $2",
+                         WHERE pid = $2",
                         level,
-                        player_id
+                        session.player_id
                     )
                     .execute(&db)
                     .await?;
@@ -1409,8 +1479,8 @@ async fn handle_command<'a>(
                 Command::Class { class } => {
                     Class::from_i16(class - 1).get("command class")?;
                     sqlx::query!(
-                        "UPDATE character set class = $1 WHERE id = $2", class,
-                        player_id,
+                        "UPDATE character set class = $1 WHERE pid = $2",
+                        class, session.player_id,
                     )
                     .execute(&db)
                     .await?;
@@ -1418,22 +1488,19 @@ async fn handle_command<'a>(
                 Command::SetPassword { new } => {
                     let hashed_password =
                         sha1_hash(&format!("{new}{HASH_CONST}"));
+                    let mut tx = db.begin().await?;
                     sqlx::query!(
-                        "UPDATE LOGINDATA as l
-                        SET pwhash = $1
-                        WHERE l.id = (
-                            SELECT character.logindata
-                            FROM character
-                            WHERE id = $2
-                        )",
+                        "UPDATE character as c
+                        SET pw_hash = $1
+                        WHERE pid = $2",
                         hashed_password,
-                        player_id
+                        session.player_id
                     )
-                    .execute(&db)
+                    .execute(&mut *tx)
                     .await?;
                 }
             }
-            Ok(player_poll(player_id, "", &db, Default::default()).await?)
+            Ok(character_poll(session, "", &db, Default::default()).await?)
         }
         "AccountCheck" => {
             let name = args.get_str(0, "name")?;
@@ -1466,10 +1533,10 @@ async fn handle_command<'a>(
     }
 }
 
-async fn player_set_face(
+async fn character_set_face(
     command_args: &CommandArguments<'_>,
     db: &sqlx::Pool<Sqlite>,
-    player_id: i64,
+    pid: i64,
 ) -> Result<ServerResponse, ServerError> {
     let race = command_args.get_int(0, "race")?;
     Race::from_i64(race).ok_or_else(|| ServerError::BadRequest)?;
@@ -1481,18 +1548,16 @@ async fn player_set_face(
         Portrait::parse(portrait_str).ok_or_else(|| ServerError::BadRequest)?;
 
     let mut tx = db.begin().await?;
-    let row = sqlx::query!(
+    let mushrooms = sqlx::query_scalar!(
         "UPDATE CHARACTER SET gender = $1, race = $2, mushrooms = mushrooms - \
-         1 WHERE id = $3 RETURNING portrait, mushrooms",
+         1 WHERE pid = $3 RETURNING mushrooms",
         gender,
         race,
-        player_id,
+        pid,
     )
     .fetch_one(&mut *tx)
     .await?;
 
-    let portrait_id = row.Portrait;
-    let mushrooms = row.Mushrooms;
     if mushrooms < 0 {
         tx.rollback().await?;
         return Err(ServerError::NotEnoughMoney);
@@ -1500,8 +1565,8 @@ async fn player_set_face(
 
     sqlx::query!(
         "UPDATE PORTRAIT SET Mouth = $1, Hair = $2, Brows = $3, Eyes = $4, \
-         Beards = $5, Nose = $6, Ears = $7, Horns = $8, extra = $9 WHERE ID = \
-         $10",
+         Beards = $5, Nose = $6, Ears = $7, Horns = $8, extra = $9 WHERE pid \
+         = $10",
         portrait.mouth,
         portrait.hair,
         portrait.eyebrows,
@@ -1511,7 +1576,7 @@ async fn player_set_face(
         portrait.ears,
         portrait.horns,
         portrait.extra,
-        portrait_id
+        pid
     )
     .execute(&mut *tx)
     .await?;
@@ -1777,8 +1842,8 @@ impl Portrait {
     }
 }
 
-async fn player_poll(
-    pid: i64,
+async fn character_poll(
+    session: Session,
     tracking: &str,
     db: &sqlx::Pool<Sqlite>,
     mut builder: ResponseBuilder,
@@ -1793,8 +1858,7 @@ async fn player_poll(
 
     let char = sqlx::query!(
         "SELECT
-        character.id, --0
-        logindata.sessionid,
+        character.pid, --0
         character.level,
         character.experience,
         character.honor,
@@ -1814,8 +1878,8 @@ async fn player_poll(
         character.class,
 
         activity.typ as activitytyp,
-        activity.subtyp as activitysubtyp,
-        activity.busyuntil,
+        activity.sub_type as activitysubtyp,
+        activity.busy_until,
 
         q1.Flavour1 as q1f1, -- 20
         q3.Flavour1 as q3f1,
@@ -1833,7 +1897,7 @@ async fn player_poll(
         q2.Location as q2location, -- 30
         q3.Location as q3location,
 
-        character.mountend,
+        character.mount_end,
         character.mount,
 
         q1.length as q1length,
@@ -1849,12 +1913,12 @@ async fn player_poll(
         q3.SILVER as q3silver,
 
         tavern.tfa,
-        tavern.BeerDrunk,
+        tavern.Beer_Drunk,
 
-        TutorialStatus,
+        Tutorial_Status,
 
-        tavern.DiceGameNextFree,
-        tavern.DiceGamesRemaining,
+        tavern.Dice_Game_Next_Free,
+        tavern.Dice_Games_Remaining,
 
         character.mushrooms,
         character.silver,
@@ -1863,32 +1927,31 @@ async fn player_poll(
         description,
         character.name,
 
-        logindata.cryptoid,
-        logindata.cryptokey,
-        logindata.logincount,
         portrait.influencer,
 
         (
         SELECT count(*)
         FROM CHARACTER AS x
-        WHERE x.server = character.server
+        WHERE x.world_id = character.world_id
           AND (x.honor > character.honor
                OR (x.honor = character.honor
-                   AND x.id <= character.id))
+                   AND x.pid <= character.pid))
         )  as `rank!: i64`,
         (
         SELECT count(*)
         FROM CHARACTER AS x
-        WHERE x.server = character.server
+        WHERE x.world_id = character.world_id
         )  as `maxrank!: i64`
 
-        FROM CHARACTER JOIN logindata on logindata.id = character.logindata \
-         JOIN activity on activity.id = character.activity JOIN portrait on \
-         portrait.id = character.portrait JOIN tavern on tavern.id = \
-         character.tavern JOIN quest as q1 on tavern.quest1 = q1.id JOIN \
-         quest as q2 on tavern.quest2 = q2.id JOIN quest as q3 on \
-         tavern.quest2 = q3.id WHERE character.id = $1",
-        pid
+        FROM CHARACTER
+         NATURAL JOIN activity
+         NATURAL JOIN tavern
+         NATURAL JOIN portrait
+         JOIN quest as q1 on tavern.quest1 = q1.id
+         JOIN quest as q2 on tavern.quest2 = q2.id
+         JOIN quest as q3 on tavern.quest2 = q3.id
+         WHERE character.pid = $1",
+        session.player_id
     )
     .fetch_one(db)
     .await?;
@@ -1906,12 +1969,12 @@ async fn player_poll(
     resp.add_str(";");
 
     resp.add_key("login count");
-    resp.add_val(char.LoginCount);
+    resp.add_val(session.login_count);
 
     resp.skip_key();
 
     resp.add_key("sessionid");
-    resp.add_str(&char.SessionID);
+    resp.add_str(&session.session_id);
 
     resp.add_key("languagecodelist");
     resp.add_str(
@@ -1964,17 +2027,17 @@ async fn player_poll(
 
     resp.add_key("ownplayersave.playerSave");
     resp.add_val(403127023); // What is this?
-    resp.add_val(pid);
+    resp.add_val(session.player_id);
     resp.add_val(0);
     resp.add_val(1708336503);
     resp.add_val(1292388336);
     resp.add_val(0);
     resp.add_val(0);
-    let level = char.Level;
+    let level = char.level;
     resp.add_val(level); // Level | Arena << 16
-    resp.add_val(char.Experience); // Experience
+    resp.add_val(char.experience); // Experience
     resp.add_val(xp_for_next_level(level)); // Next Level XP
-    let honor = char.Honor;
+    let honor = char.honor;
     resp.add_val(honor); // Honor
     let rank = char.rank;
     resp.add_val(rank); // Rank
@@ -1982,23 +2045,23 @@ async fn player_poll(
     resp.add_val(0); // 12?
     resp.add_val(10); // 13?
     resp.add_val(0); // 14?
-    resp.add_val(15); // 15?
+    resp.add_val(char.mushrooms); // Mushroms gained
     resp.add_val(0); // 16?
 
     // Portrait start
-    resp.add_val(char.Mouth); // mouth
-    resp.add_val(char.Hair); // hair
-    resp.add_val(char.Brows); // brows
-    resp.add_val(char.Eyes); // eyes
-    resp.add_val(char.Beards); // beards
-    resp.add_val(char.Nose); // nose
-    resp.add_val(char.Ears); // ears
-    resp.add_val(char.Extra); // extra
-    resp.add_val(char.Horns); // horns
-    resp.add_val(char.Influencer); // influencer
-    resp.add_val(char.Race); // race
-    resp.add_val(char.Gender); // Gender & Mirror
-    resp.add_val(char.Class); // class
+    resp.add_val(char.mouth); // mouth
+    resp.add_val(char.hair); // hair
+    resp.add_val(char.brows); // brows
+    resp.add_val(char.eyes); // eyes
+    resp.add_val(char.beards); // beards
+    resp.add_val(char.nose); // nose
+    resp.add_val(char.ears); // ears
+    resp.add_val(char.extra); // extra
+    resp.add_val(char.horns); // horns
+    resp.add_val(char.influencer); // influencer
+    resp.add_val(char.race); // race
+    resp.add_val(char.gender); // Gender & Mirror
+    resp.add_val(char.class); // class
 
     // Attributes
     for _ in 0..AttributeType::COUNT {
@@ -2017,7 +2080,7 @@ async fn player_poll(
 
     resp.add_val(char.activitytyp); // Current action
     resp.add_val(char.activitysubtyp); // Secondary (time busy)
-    resp.add_val(char.BusyUntil); // Busy until
+    resp.add_val(char.busy_until); // Busy until
 
     // Equipment
     for slot in [
@@ -2062,8 +2125,8 @@ async fn player_poll(
     resp.add_val(char.q2location); // 239 quest 2 location
     resp.add_val(char.q3location); // 240 quest 3 location
 
-    let mut mount_end = char.MountEnd;
-    let mut mount = char.Mount;
+    let mut mount_end = char.mount_end;
+    let mut mount = char.mount;
 
     let mount_effect = effective_mount(&mut mount_end, &mut mount);
 
@@ -2114,7 +2177,7 @@ async fn player_poll(
 
     resp.add_val(0); // 443 guild join date
     resp.add_val(0); // 444
-    resp.add_val(0); // 445 player_hp_bonus << 24, damage_bonus << 16
+    resp.add_val(0); // 445 character_hp_bonus << 24, damage_bonus << 16
     resp.add_val(0); // 446
     resp.add_val(0); // 447  Armor
     resp.add_val(6); // 448  Min damage
@@ -2125,8 +2188,8 @@ async fn player_poll(
     resp.add_val(0); // 453
     resp.add_val(0); // 454
     resp.add_val(1708336503); // 455
-    resp.add_val(char.TFA); // 456 Alu secs
-    resp.add_val(char.BeerDrunk); // 457 Beer drunk
+    resp.add_val(char.tfa); // 456 Alu secs
+    resp.add_val(char.beer_drunk); // 457 Beer drunk
     resp.add_val(0); // 458
     resp.add_val(0); // 459 dungeon_timer
     resp.add_val(1708336503); // 460 Next free fight
@@ -2286,7 +2349,7 @@ async fn player_poll(
     resp.add_val(0); // 594 gem_stone_target
     resp.add_val(0); // 595 gem_search_finish
     resp.add_val(0); // 596 gem_search_began
-    resp.add_val(char.TutorialStatus); // 597 Pretty sure this is a bit map of which messages have been seen
+    resp.add_val(char.tutorial_status); // 597 Pretty sure this is a bit map of which messages have been seen
     resp.add_val(0); // 598
 
     // Arena enemies
@@ -2342,8 +2405,8 @@ async fn player_poll(
     resp.add_val(0); // 647
     resp.add_val(0); // 648
     resp.add_val(in_seconds(60 * 60)); // 649 calendar_next_possible
-    resp.add_val(char.DiceGameNextFree); // 650 dice_games_next_free
-    resp.add_val(char.DiceGamesRemaining); // 651 dice_games_remaining
+    resp.add_val(char.dice_game_next_free); // 650 dice_games_next_free
+    resp.add_val(char.dice_games_remaining); // 651 dice_games_remaining
     resp.add_val(0); // 652
     resp.add_val(0); // 653 druid mask
     resp.add_val(0); // 654
@@ -2453,11 +2516,11 @@ async fn player_poll(
     resp.add_str(""); // 758
 
     resp.add_key("resources");
-    resp.add_val(pid); // player_id
-    resp.add_val(char.Mushrooms); // mushrooms
-    resp.add_val(char.Silver); // silver
+    resp.add_val(session.player_id); // pid
+    resp.add_val(char.mushrooms); // mushrooms
+    resp.add_val(char.silver); // silver
     resp.add_val(0); // lucky coins
-    resp.add_val(char.QuickSand); // quicksand glasses
+    resp.add_val(char.quicksand); // quicksand glasses
     resp.add_val(0); // wood
     resp.add_val(0); // ??
     resp.add_val(0); // stone
@@ -2471,10 +2534,10 @@ async fn player_poll(
     }
 
     resp.add_key("owndescription.s");
-    resp.add_str(&to_sf_string(&char.Description));
+    resp.add_str(&to_sf_string(&char.description));
 
     resp.add_key("ownplayername.r");
-    resp.add_str(&char.Name);
+    resp.add_str(&char.name);
 
     let maxrank = char.maxrank;
 
@@ -2674,20 +2737,20 @@ async fn player_poll(
     resp.add_str("a*******@a****.***");
 
     resp.add_key("cryptoid");
-    resp.add_val(char.CryptoID);
+    resp.add_val(session.crypto_id);
 
     resp.add_key("cryptokey");
-    resp.add_val(char.CryptoKey);
+    resp.add_val(session.crypto_key);
 
-    resp.add_key("pendingrewards");
-    for i in 0..20 {
-        resp.add_val(9999 + i);
-        resp.add_val(2);
-        resp.add_val(i);
-        resp.add_val("Reward Name");
-        resp.add_val(1717777586);
-        resp.add_val(1718382386);
-    }
+    // resp.add_key("pendingrewards");
+    // for i in 0..10 {
+    //     resp.add_val(9999 + i);
+    //     resp.add_val(2);
+    //     resp.add_val(i);
+    //     resp.add_val("Reward Name");
+    //     resp.add_val(1717777586);
+    //     resp.add_val(1718382386);
+    // }
 
     resp.build()
 }
@@ -2766,6 +2829,9 @@ enum Command {
     SetPassword {
         new: String,
     },
+    AddWorld {
+        world_name: String,
+    },
 }
 
 fn xp_for_next_level(level: i64) -> i64 {
@@ -2836,6 +2902,7 @@ fn xp_for_next_level(level: i64) -> i64 {
         .unwrap_or(1500000000)
 }
 
+#[allow(unused)]
 fn get_debug_value(name: &str) -> i64 {
     std::fs::read_to_string(format!("values/{name}.txt"))
         .ok()

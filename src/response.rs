@@ -68,7 +68,6 @@ impl ResponseBuilder {
         for _ in 0..12 {
             self.add_val(0);
         }
-        return self;
 
         let path = format!("items/{}.json", name.as_ref());
         let Some(weapon) = std::fs::read_to_string(&path)
