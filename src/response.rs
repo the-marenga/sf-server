@@ -6,8 +6,6 @@ use axum::{
 };
 use thiserror::Error;
 
-use crate::RawItem;
-
 pub enum ServerResponse {
     Success,
     Data(String),
@@ -25,8 +23,8 @@ pub enum ServerError {
     WrongPassword,
     #[error("command requires valid session")]
     InvalidAuth,
-    #[error("unknown request")]
-    UnknownRequest,
+    #[error("unknown request: {0}")]
+    UnknownRequest(Box<str>),
     #[error("command missing argument: {0}")]
     MissingArgument(&'static str),
     #[error("need more gold")]
@@ -61,26 +59,6 @@ pub struct ResponseBuilder {
 }
 
 impl ResponseBuilder {
-    pub fn add_dyn_item(
-        &mut self,
-        name: impl AsRef<str>,
-    ) -> &mut ResponseBuilder {
-        // NOTE: This function kills performance for obvious reasons. Remove
-        // this, if you want to do benchmarks
-        let path = format!("items/{}.json", name.as_ref());
-        let Some(weapon) = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|a| serde_json::from_str::<RawItem>(&a).ok())
-        else {
-            for _ in 0..12 {
-                self.add_val(0);
-            }
-            return self;
-        };
-        weapon.serialize_response(self);
-        self
-    }
-
     pub fn add_key(&mut self, key: &str) -> &mut ResponseBuilder {
         if !self.resp.is_empty() {
             self.resp.push('&')
