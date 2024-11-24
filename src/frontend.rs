@@ -80,10 +80,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
 
         config.servers.clear();
 
-        let db = crate::get_db().await.map_err(|e| {
-            error!("Database connection error: {:?}", e);
-            INTERNAL_ERR
-        })?;
+        let db = crate::get_db().await.map_err(|_| INTERNAL_ERR)?;
 
         let servers = sqlx::query!("SELECT * FROM world")
             .fetch_all(&db)
