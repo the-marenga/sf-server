@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use axum::{extract::Request, response::*};
+use log::error;
 use once_cell::sync::OnceCell;
 use reqwest::{header::CONTENT_TYPE, Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -32,18 +33,27 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
 
     let client = get_client();
     let get_text = |url: String| async {
-        let resp = client.get(url).send().await.map_err(|_| INTERNAL_ERR)?;
+        let resp = client.get(url).send().await.map_err(|e| {
+            error!("Error while sending request: {:?}", e);
+            INTERNAL_ERR
+        })?;
         let status = resp.status();
         if !status.is_success() {
             return Err(status);
         }
-        resp.text().await.map_err(|_| INTERNAL_ERR)
+        resp.text().await.map_err(|e| {
+            error!("Error while reading response text: {:?}", e);
+            INTERNAL_ERR
+        })
     };
 
     if uri == "/js/build.json" {
         let text = get_text(sfgame_url()).await?;
-        let mut json: HashMap<String, String> =
-            serde_json::from_str(&text).map_err(|_| INTERNAL_ERR)?;
+        let mut json: HashMap<String, String> = serde_json::from_str(&text)
+            .map_err(|e| {
+                error!("Error while parsing JSON: {:?}", e);
+                INTERNAL_ERR
+            })?;
         let fw = json.get_mut("frameworkUrl").ok_or(INTERNAL_ERR)?;
         *fw = fw.split_once(".com").ok_or(INTERNAL_ERR)?.1.into();
         Ok(axum::Json(json).into_response())
@@ -55,12 +65,18 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
             .status(200)
             .header(CONTENT_TYPE, "application/javascript")
             .body(axum::body::Body::from(fixed_framework))
-            .map_err(|_| INTERNAL_ERR)
+            .map_err(|e| {
+                error!("Error while building response body: {:?}", e);
+                INTERNAL_ERR
+            })
     } else if uri == "/config.json" {
         // Rewrite the server list to our server(s)
         let text = get_text(sfgame_url()).await?;
         let mut config: SFConfig =
-            serde_json::from_str(&text).map_err(|_| INTERNAL_ERR)?;
+            serde_json::from_str(&text).map_err(|e| {
+                error!("Error while parsing config JSON: {:?}", e);
+                INTERNAL_ERR
+            })?;
 
         config.servers.clear();
 
@@ -69,7 +85,10 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
         let servers = sqlx::query!("SELECT * FROM world")
             .fetch_all(&db)
             .await
-            .map_err(|_| INTERNAL_ERR)?;
+            .map_err(|e| {
+                error!("Database query error: {:?}", e);
+                INTERNAL_ERR
+            })?;
 
         for server in servers {
             let server_host = req
@@ -104,7 +123,10 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
         // would obliterate any simple "write to memory, then send out" logic
         builder
             .body(axum::body::Body::from_stream(resp.bytes_stream()))
-            .map_err(|_| INTERNAL_ERR)
+            .map_err(|e| {
+                error!("Error while building response body: {:?}", e);
+                INTERNAL_ERR
+            })
     }
 }
 

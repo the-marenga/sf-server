@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use axum::{extract::Query, response::Response};
 use base64::Engine;
+use log::error;
 
 use crate::{
     command::{handle_command, CommandArguments},
@@ -19,9 +20,14 @@ pub async fn handle_cmd(
     let command_args = req_params.get("params").get("command_args")?;
     let command_args = base64::engine::general_purpose::URL_SAFE
         .decode(command_args)
-        .map_err(|_| ServerError::BadRequest)?;
-    let command_args =
-        String::from_utf8(command_args).map_err(|_| ServerError::BadRequest)?;
+        .map_err(|e| {
+            error!("Error while decoding command_args: {:?}", e);
+            ServerError::BadRequest
+        })?;
+    let command_args = String::from_utf8(command_args).map_err(|e| {
+        error!("Error while converting command_args to UTF-8: {:?}", e);
+        ServerError::BadRequest
+    })?;
 
     let world = "";
 
@@ -35,7 +41,10 @@ pub async fn handle_cmd(
             )
             .fetch_one(&db)
             .await
-            .map_err(ServerError::DBError)?;
+            .map_err(|e| {
+                error!("Database error while fetching world_id: {:?}", e);
+                ServerError::DBError(e)
+            })?;
 
             Session::new_unauthed(world_id)
         }
@@ -52,7 +61,10 @@ pub async fn handle_cmd(
             )
             .fetch_optional(&db)
             .await
-            .map_err(ServerError::DBError)?;
+            .map_err(|e| {
+                error!("Database error while fetching session: {:?}", e);
+                ServerError::DBError(e)
+            })?;
 
             let Some(row) = res else {
                 return Err(ServerError::InvalidAuth.into());
@@ -105,7 +117,10 @@ pub async fn handle_req(
             )
             .fetch_one(&db)
             .await
-            .map_err(ServerError::DBError)?;
+            .map_err(|e| {
+                error!("Database error while fetching world_id: {:?}", e);
+                ServerError::DBError(e)
+            })?;
 
             Session::new_unauthed(world_id)
         }
@@ -122,7 +137,10 @@ pub async fn handle_req(
             )
             .fetch_optional(&db)
             .await
-            .map_err(ServerError::DBError)?;
+            .map_err(|e| {
+                error!("Database error while fetching session: {:?}", e);
+                ServerError::DBError(e)
+            })?;
 
             let Some(row) = res else {
                 return Err(ServerError::InvalidAuth.into());
@@ -164,7 +182,10 @@ fn decrypt_server_request(
 ) -> Result<String, ServerError> {
     let text = base64::engine::general_purpose::URL_SAFE
         .decode(to_decrypt)
-        .map_err(|_| ServerError::BadRequest)?;
+        .map_err(|e| {
+            error!("Error while decoding to_decrypt: {:?}", e);
+            ServerError::BadRequest
+        })?;
 
     let mut my_key = [0; 16];
     my_key.copy_from_slice(&key.as_bytes()[..16]);
@@ -174,7 +195,10 @@ fn decrypt_server_request(
     const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
     let decrypted = cipher.cbc_decrypt(CRYPTO_IV.as_bytes(), &text);
 
-    String::from_utf8(decrypted).map_err(|_| ServerError::BadRequest)
+    String::from_utf8(decrypted).map_err(|e| {
+        error!("Error while converting decrypted text to UTF-8: {:?}", e);
+        ServerError::BadRequest
+    })
 }
 
 #[derive(Debug)]

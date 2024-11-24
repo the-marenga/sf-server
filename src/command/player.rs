@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use fastrand::Rng;
+use log::error;
 use num_traits::FromPrimitive;
 use sf_api::gamestate::character::{Gender, Race};
 use sqlx::Sqlite;
@@ -108,7 +109,10 @@ pub(crate) async fn player_whisper(
     }
     use clap::Parser;
     let command = CheatCmd::try_parse_from(args.get_str(1, "args")?.split(' '))
-        .map_err(|_| ServerError::BadRequest)?;
+        .map_err(|e| {
+            error!("Error while parsing command: {:?}", e);
+            ServerError::BadRequest
+        })?;
     handle_cheat_command(session, db, command).await
 }
 
@@ -559,7 +563,10 @@ pub(crate) async fn player_get_hof(
                 character.class,
                 "bg"
             ))
-            .unwrap();
+            .map_err(|e| {
+                error!("Error while writing format: {:?}", e);
+                ServerError::Internal
+            })?;
     }
 
     ResponseBuilder::default()
