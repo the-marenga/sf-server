@@ -6,7 +6,7 @@ use axum::{
     response::Redirect,
     routing::get,
 };
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use request::{handle_cmd, handle_req};
 use sqlx::{sqlite::SqlitePoolOptions, Sqlite};
 
@@ -117,7 +117,10 @@ pub async fn get_db() -> Result<sqlx::Pool<Sqlite>, ServerError> {
             .max_connections(50)
             .connect(env!("DATABASE_URL"))
             .await
-            .map_err(|a| a.into())
+            .map_err(|e| {
+                error!("Database connection error: {:?}", e);
+                e.into()
+            })
     })
     .await
     .cloned()
