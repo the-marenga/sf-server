@@ -3,8 +3,8 @@ use sqlx::Sqlite;
 use strum::EnumCount;
 
 use super::{
-    effective_mount, in_seconds, item::add_debug_item, now, xp_for_next_level,
-    ResponseBuilder, ServerError, ServerResponse,
+    effective_mount, get_debug_value_default, in_seconds, item::add_debug_item,
+    now, xp_for_next_level, ResponseBuilder, ServerError, ServerResponse,
 };
 use crate::{misc::to_sf_string, request::Session, SERVER_VERSION};
 
@@ -519,9 +519,9 @@ pub(crate) async fn poll(
     resp.add_val(0); // 598
 
     // Arena enemies
-    resp.add_val(0); // 599
-    resp.add_val(0); // 600
-    resp.add_val(0); // 601
+    resp.add_val(get_debug_value_default("arena_enemy1", 1)); // 599
+    resp.add_val(get_debug_value_default("arena_enemy2", 1)); // 600
+    resp.add_val(get_debug_value_default("arena_enemy3", 1)); // 601
 
     resp.add_val(0); // 602
     resp.add_val(0); // 603

@@ -3,7 +3,7 @@ use std::fmt::Write;
 use fastrand::Rng;
 use log::error;
 use num_traits::FromPrimitive;
-use sf_api::gamestate::character::{Gender, Race};
+use sf_api::gamestate::character::{Attributes, Gender, Race};
 use sqlx::Sqlite;
 
 use super::{
@@ -642,4 +642,296 @@ pub(crate) async fn player_set_face(
     tx.commit().await?;
 
     Ok(ServerResponse::Success)
+}
+
+pub(crate) async fn player_look_at(
+    _session: Session,
+    db: &sqlx::Pool<Sqlite>,
+    args: CommandArguments<'_>,
+) -> Result<ServerResponse, ServerError> {
+    let pid = match args.get_int(0, "") {
+        Ok(x) => x,
+        Err(_) => {
+            let name = args.get_str(0, "look at pid or name")?;
+            sqlx::query_scalar!(
+                "SELECT pid FROM character WHERE name = $1", name
+            )
+            .fetch_one(db)
+            .await?
+        }
+    };
+
+    let mut resp = ResponseBuilder::default();
+    let info = sqlx::query!(
+        "
+        SELECT name, level, honor, experience, race, portrait.*, gender, class,
+            a.*, description
+        FROM character c
+        NATURAL JOIN portrait
+        JOIN attributes a on a.id = c.attributes
+        WHERE pid = $1",
+        pid
+    )
+    .fetch_one(db)
+    .await?;
+
+    resp.add_key("otherplayergroupname.r");
+    resp.add_val("");
+    resp.add_key("otherplayer.playerlookat");
+    resp.add_val(pid);
+    resp.add_val(0);
+    resp.add_val(info.level);
+    resp.add_val(info.experience); // xp
+    resp.add_val(xp_for_next_level(info.level)); // xp next lvl
+    resp.add_val(info.honor);
+    resp.add_val(10); // TODO: Rank
+    resp.add_val(0); // ?
+    resp.add_val(info.mouth);
+    resp.add_val(info.hair);
+    resp.add_val(info.brows);
+    resp.add_val(info.eyes);
+    resp.add_val(info.beards);
+    resp.add_val(info.nose);
+    resp.add_val(info.ears);
+    resp.add_val(info.extra);
+    resp.add_val(info.horns);
+    resp.add_val(info.influencer);
+    resp.add_val(info.race);
+    resp.add_val(info.gender);
+    resp.add_val(info.class);
+    resp.add_val(info.strength);
+    resp.add_val(info.dexterity);
+    resp.add_val(info.intelligence);
+    resp.add_val(info.stamina);
+    resp.add_val(info.luck);
+    // TODO: Bonus attrs
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+
+    for _ in 0..8 {
+        resp.add_val(0);
+    }
+
+    // Equipment
+    for _ in 0..10 {
+        for _ in 0..12 {
+            resp.add_val(0);
+        }
+    }
+    resp.add_val(0); // 159 mount
+    resp.add_val(58);
+    resp.add_val(37408);
+    resp.add_val(2723);
+    resp.add_val(11901);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1393194397);
+    resp.add_val(1);
+    resp.add_val(4165);
+    resp.add_val(958);
+    resp.add_val(2642);
+    resp.add_val(3906638);
+    for _ in 0..36 {
+        resp.add_val(0);
+    }
+    // Mainly fortress stuff
+    for _ in 0..53 {
+        resp.add_val(0);
+    }
+    resp.add_key("otherdescription.s");
+    resp.add_str(&info.description);
+    resp.add_key("otherplayername.r");
+    resp.add_val(info.name);
+    resp.add_key("otherplayerunitlevel(4)");
+    resp.add_val(190);
+    resp.add_val(140);
+    resp.add_val(145);
+    resp.add_val(145);
+    resp.add_key("otherplayerfriendstatus");
+    resp.add_val(0);
+    resp.add_key("otherplayerfortressrank");
+    resp.add_val(0);
+    resp.add_key("otherplayerpetbonus.petbonus");
+    resp.add_val(207011);
+    resp.add_val(7);
+    resp.add_val(6);
+    resp.add_val(6);
+    resp.add_val(6);
+    resp.add_val(6);
+    resp.add_key("soldieradvice");
+    resp.add_val(18);
+    resp.build()
+}
+
+pub(crate) async fn player_arena_fight(
+    session: Session,
+    db: &sqlx::Pool<Sqlite>,
+    args: CommandArguments<'_>,
+) -> Result<ServerResponse, ServerError> {
+    let enemy_name = args.get_str(0, "arena enemy name")?;
+
+    let enemy_id = sqlx::query_scalar!(
+        "SELECT pid FROM character WHERE name = $1", enemy_name
+    )
+    .fetch_one(db)
+    .await?;
+
+    struct PlayerInfo {
+        pid: i64,
+        name: String,
+        level: i64,
+        race: i64,
+        gender: i64,
+        class: i64,
+        portrait: Portrait,
+        attributes: Attributes,
+    }
+
+    let mut fighters = vec![];
+
+    for p in [session.player_id, enemy_id] {
+        let info = sqlx::query!(
+            "SELECT name, portrait.*, a.*, level, class, race, gender
+            FROM character c
+            NATURAL JOIN portrait
+            JOIN attributes a on a.id = c.attributes
+            WHERE pid = $1",
+            p
+        )
+        .fetch_one(db)
+        .await?;
+
+        fighters.push(PlayerInfo {
+            pid: p,
+            gender: info.gender,
+            level: info.level,
+            name: info.name,
+            class: info.class,
+            race: info.race,
+            portrait: Portrait {
+                mouth: info.mouth as i32,
+                hair: info.hair as i32,
+                eyebrows: info.eyes as i32,
+                eyes: info.eyes as i32,
+                beard: info.beards as i32,
+                nose: info.nose as i32,
+                ears: info.ears as i32,
+                extra: info.extra as i32,
+                horns: info.horns as i32,
+            },
+            attributes: Attributes([
+                info.strength as u32, info.dexterity as u32,
+                info.intelligence as u32, info.stamina as u32,
+                info.luck as u32,
+            ]),
+        })
+    }
+
+    let mut resp = ResponseBuilder::default();
+    resp.add_key("fightversion");
+    resp.add_val(2);
+
+    resp.add_key("fightheader.fighters");
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1);
+
+    let starting_hp = 10_000;
+
+    for fighter in &fighters {
+        // Player a info
+        resp.add_val(fighter.pid);
+        resp.add_str(&fighter.name);
+        resp.add_val(fighter.level);
+        resp.add_val(starting_hp); // TODO: Calc their hp
+        resp.add_val(starting_hp); // TODO: Calc their hp
+        resp.add_val(fighter.attributes.0[0]); // str
+        resp.add_val(fighter.attributes.0[1]); // dex
+        resp.add_val(fighter.attributes.0[2]); // int
+        resp.add_val(fighter.attributes.0[3]); // const
+        resp.add_val(fighter.attributes.0[4]); // luck
+        resp.add_val(fighter.portrait.mouth); // mouth
+        resp.add_val(fighter.portrait.hair); // hair
+        resp.add_val(fighter.portrait.eyebrows); // brows
+        resp.add_val(fighter.portrait.eyes); // eyes
+        resp.add_val(fighter.portrait.beard); // beards
+        resp.add_val(fighter.portrait.nose); // nose
+        resp.add_val(fighter.portrait.ears); // ears
+        resp.add_val(fighter.portrait.extra); // extra
+        resp.add_val(fighter.portrait.horns); // horns
+        resp.add_val(0); // influencer
+        resp.add_val(fighter.race);
+        resp.add_val(fighter.gender);
+        resp.add_val(fighter.class);
+        // Dont know, don't care (yet)
+        resp.add_val(185204737);
+        resp.add_val(327703);
+        resp.add_val(494);
+        resp.add_val(962);
+        resp.add_val(4);
+        resp.add_val(1);
+        resp.add_val(2);
+        resp.add_val(709);
+        resp.add_val(0);
+        resp.add_val(0);
+        resp.add_val(110873491);
+        resp.add_val(23396352);
+        // Some item i think
+        for _ in 0..12 {
+            resp.add_val(0);
+        }
+    }
+
+    resp.add_key("fight.r");
+
+    let mut player_a_hp = starting_hp;
+    let mut player_b_hp = starting_hp;
+
+    let mut rng = fastrand::Rng::new();
+    for round in 0.. {
+        let (pid, our_hp, enemy_hp) = if round % 2 == 0 {
+            (fighters[0].pid, &mut player_a_hp, &mut player_b_hp)
+        } else {
+            (fighters[1].pid, &mut player_b_hp, &mut player_a_hp)
+        };
+        *enemy_hp -= rng.i32(2_000..=4_000);
+        resp.add_val(pid);
+        resp.add_val(0);
+        resp.add_val(1); // Attack type (weapon, catapult, etc.)
+        resp.add_val(0); // Enemy reaction (repelled/dodged)
+        resp.add_val(0);
+        resp.add_val(*our_hp);
+        resp.add_val(*enemy_hp);
+        resp.add_val(0);
+        resp.add_val(0);
+        if player_a_hp <= 0 || player_b_hp <= 0 {
+            break;
+        }
+    }
+    resp.add_key("winnerid");
+    resp.add_val(if player_a_hp > 0 {
+        fighters[0].pid
+    } else {
+        fighters[1].pid
+    });
+    resp.add_key("fightresult.battlereward");
+    resp.add_val((player_a_hp > 0) as i32); // have we won?
+    resp.add_val(1);
+    resp.add_val(0); // silver
+    resp.add_val(1000); // xp won
+    resp.add_val(100); // mushrooms
+    resp.add_val(0); // honor won
+    resp.add_val(0);
+    resp.add_val(2); // rank pre
+    resp.add_val(2); // rank post
+                     // Item
+    for _ in 0..12 {
+        resp.add_val(0);
+    }
+    resp.build()
 }

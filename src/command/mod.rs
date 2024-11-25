@@ -69,10 +69,14 @@ pub(crate) async fn handle_command<'a>(
         "PendingRewardView" => pending_reward_view(session, db, args).await,
         "PlayerAdventureFinished" => player_finish_quest(session, db).await,
         "PlayerAdventureStart" => player_start_quest(session, db, args).await,
+        "PlayerArenaEnemy" => poll(session, "", db, Default::default()).await,
+        "PlayerArenaFight" => player_arena_fight(session, db, args).await,
+        "PlayerLookAt" => player_look_at(session, db, args).await,
         "PlayerGambleGold" => player_gamble_gold(session, db, args).await,
         "PlayerGetHallOfFame" => player_get_hof(session, db, args).await,
         "PlayerHelpshiftAuthtoken" => player_helpshift_auth_token(),
         "PlayerMountBuy" => player_mount_buy(session, db, args).await,
+        "PlayerPollScrapbook" => Ok(ServerResponse::Success), // TODO:
         "PlayerSetDescription" => player_set_descr(session, db, args).await,
         "PlayerSetFace" => player_set_face(session, db, args).await,
         "PlayerTutorialStatus" => player_tutorial(session, db, args).await,
@@ -164,6 +168,14 @@ fn get_debug_value(name: &str) -> i64 {
         .ok()
         .and_then(|a| a.trim().parse().ok())
         .unwrap_or(0)
+}
+
+#[allow(unused)]
+fn get_debug_value_default(name: &str, default: i64) -> i64 {
+    std::fs::read_to_string(format!("values/{name}.txt"))
+        .ok()
+        .and_then(|a| a.trim().parse().ok())
+        .unwrap_or(default)
 }
 
 pub struct Portrait {
