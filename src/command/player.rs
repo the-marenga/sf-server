@@ -3,7 +3,10 @@ use std::fmt::Write;
 use fastrand::Rng;
 use log::error;
 use num_traits::FromPrimitive;
-use sf_api::gamestate::character::{Attributes, Gender, Race};
+use sf_api::{
+    gamestate::character::{Gender, Race},
+    misc::from_sf_string,
+};
 use sqlx::Sqlite;
 
 use super::{
@@ -11,7 +14,7 @@ use super::{
     effective_mount, in_seconds, now, poll, xp_for_next_level,
     CommandArguments, Portrait, ResponseBuilder, ServerError, ServerResponse,
 };
-use crate::{misc::from_sf_string, request::Session};
+use crate::request::Session;
 
 pub(crate) async fn player_mount_buy(
     session: Session,
@@ -779,57 +782,6 @@ pub(crate) async fn player_arena_fight(
     .fetch_one(db)
     .await?;
 
-    struct PlayerInfo {
-        pid: i64,
-        name: String,
-        level: i64,
-        race: i64,
-        gender: i64,
-        class: i64,
-        portrait: Portrait,
-        attributes: Attributes,
-    }
-
-    let mut fighters = vec![];
-
-    for p in [session.player_id, enemy_id] {
-        let info = sqlx::query!(
-            "SELECT name, portrait.*, a.*, level, class, race, gender
-            FROM character c
-            NATURAL JOIN portrait
-            JOIN attributes a on a.id = c.attributes
-            WHERE pid = $1",
-            p
-        )
-        .fetch_one(db)
-        .await?;
-
-        fighters.push(PlayerInfo {
-            pid: p,
-            gender: info.gender,
-            level: info.level,
-            name: info.name,
-            class: info.class,
-            race: info.race,
-            portrait: Portrait {
-                mouth: info.mouth as i32,
-                hair: info.hair as i32,
-                eyebrows: info.eyes as i32,
-                eyes: info.eyes as i32,
-                beard: info.beards as i32,
-                nose: info.nose as i32,
-                ears: info.ears as i32,
-                extra: info.extra as i32,
-                horns: info.horns as i32,
-            },
-            attributes: Attributes([
-                info.strength as u32, info.dexterity as u32,
-                info.intelligence as u32, info.stamina as u32,
-                info.luck as u32,
-            ]),
-        })
-    }
-
     let mut resp = ResponseBuilder::default();
     resp.add_key("fightversion");
     resp.add_val(2);
@@ -841,30 +793,43 @@ pub(crate) async fn player_arena_fight(
     resp.add_val(0);
     resp.add_val(1);
 
+    let fighters = [session.player_id, enemy_id];
+
     let starting_hp = 10_000;
 
-    for fighter in &fighters {
+    for pid in fighters {
+        let fighter = sqlx::query!(
+            "SELECT name, portrait.*, a.*, level, class, race, gender
+            FROM character c
+            NATURAL JOIN portrait
+            JOIN attributes a on a.id = c.attributes
+            WHERE pid = $1",
+            pid
+        )
+        .fetch_one(db)
+        .await?;
+
         // Player a info
         resp.add_val(fighter.pid);
         resp.add_str(&fighter.name);
         resp.add_val(fighter.level);
         resp.add_val(starting_hp); // TODO: Calc their hp
         resp.add_val(starting_hp); // TODO: Calc their hp
-        resp.add_val(fighter.attributes.0[0]); // str
-        resp.add_val(fighter.attributes.0[1]); // dex
-        resp.add_val(fighter.attributes.0[2]); // int
-        resp.add_val(fighter.attributes.0[3]); // const
-        resp.add_val(fighter.attributes.0[4]); // luck
-        resp.add_val(fighter.portrait.mouth); // mouth
-        resp.add_val(fighter.portrait.hair); // hair
-        resp.add_val(fighter.portrait.eyebrows); // brows
-        resp.add_val(fighter.portrait.eyes); // eyes
-        resp.add_val(fighter.portrait.beard); // beards
-        resp.add_val(fighter.portrait.nose); // nose
-        resp.add_val(fighter.portrait.ears); // ears
-        resp.add_val(fighter.portrait.extra); // extra
-        resp.add_val(fighter.portrait.horns); // horns
-        resp.add_val(0); // influencer
+        resp.add_val(fighter.strength); // str
+        resp.add_val(fighter.dexterity); // dex
+        resp.add_val(fighter.intelligence); // int
+        resp.add_val(fighter.stamina); // const
+        resp.add_val(fighter.luck); // luck
+        resp.add_val(fighter.mouth); // mouth
+        resp.add_val(fighter.hair); // hair
+        resp.add_val(fighter.eyes); // brows
+        resp.add_val(fighter.eyes); // eyes
+        resp.add_val(fighter.beards); // beards
+        resp.add_val(fighter.nose); // nose
+        resp.add_val(fighter.ears); // ears
+        resp.add_val(fighter.extra); // extra
+        resp.add_val(fighter.horns); // horns
+        resp.add_val(fighter.influencer); // influencer
         resp.add_val(fighter.race);
         resp.add_val(fighter.gender);
         resp.add_val(fighter.class);
@@ -895,9 +860,9 @@ pub(crate) async fn player_arena_fight(
     let mut rng = fastrand::Rng::new();
     for round in 0.. {
         let (pid, our_hp, enemy_hp) = if round % 2 == 0 {
-            (fighters[0].pid, &mut player_a_hp, &mut player_b_hp)
+            (fighters[0], &mut player_a_hp, &mut player_b_hp)
         } else {
-            (fighters[1].pid, &mut player_b_hp, &mut player_a_hp)
+            (fighters[1], &mut player_b_hp, &mut player_a_hp)
         };
         *enemy_hp -= rng.i32(2_000..=4_000);
         resp.add_val(pid);
@@ -915,9 +880,9 @@ pub(crate) async fn player_arena_fight(
     }
     resp.add_key("winnerid");
     resp.add_val(if player_a_hp > 0 {
-        fighters[0].pid
+        fighters[0]
     } else {
-        fighters[1].pid
+        fighters[1]
     });
     resp.add_key("fightresult.battlereward");
     resp.add_val((player_a_hp > 0) as i32); // have we won?

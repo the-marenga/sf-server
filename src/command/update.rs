@@ -1,12 +1,14 @@
-use sf_api::{command::AttributeType, gamestate::items::EquipmentSlot};
+use sf_api::{
+    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
+};
 use sqlx::Sqlite;
-use strum::EnumCount;
+use strum::IntoEnumIterator;
 
 use super::{
     effective_mount, get_debug_value_default, in_seconds, item::add_debug_item,
     now, xp_for_next_level, ResponseBuilder, ServerError, ServerResponse,
 };
-use crate::{misc::to_sf_string, request::Session, SERVER_VERSION};
+use crate::{request::Session, SERVER_VERSION};
 
 pub(crate) async fn poll(
     session: Session,
@@ -230,17 +232,17 @@ pub(crate) async fn poll(
     resp.add_val(char.class); // class
 
     // Attributes
-    for _ in 0..AttributeType::COUNT {
+    for _ in AttributeType::iter() {
         resp.add_val(100); // 30..=34
     }
 
     // attribute_additions (aggregate from equipment)
-    for _ in 0..AttributeType::COUNT {
+    for _ in AttributeType::iter() {
         resp.add_val(0); // 35..=38
     }
 
     // attribute_times_bought
-    for _ in 0..AttributeType::COUNT {
+    for _ in AttributeType::iter() {
         resp.add_val(0); // 40..=44
     }
 
