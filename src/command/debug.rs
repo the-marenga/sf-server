@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand};
 use num_traits::FromPrimitive;
-use sf_api::gamestate::character::Class;
+use sf_api::{
+    gamestate::character::Class,
+    misc::{sha1_hash, HASH_CONST},
+};
 use sqlx::Sqlite;
 
 use super::{update::poll, ServerError, ServerResponse};
-use crate::{
-    misc::{sha1_hash, OptionGet, HASH_CONST},
-    request::Session,
-};
+use crate::{misc::OptionGet, request::Session};
 
 #[derive(Debug, Parser)]
 #[command(about, version, no_binary_name(true))]

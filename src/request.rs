@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use axum::{extract::Query, response::Response};
 use base64::Engine;
 use log::error;
+use sf_api::misc::decrypt_server_request;
 
 use crate::{
     command::{handle_command, CommandArguments},
@@ -157,7 +158,8 @@ pub async fn handle_req(
     };
 
     let request =
-        decrypt_server_request(encrypted_request, &session.crypto_key)?;
+        decrypt_server_request(encrypted_request, &session.crypto_key)
+            .map_err(|_| ServerError::BadRequest)?;
 
     let Some((_session_id, request)) = request.split_once('|') else {
         return Err(ServerError::BadRequest.into());
@@ -174,31 +176,6 @@ pub async fn handle_req(
         .await
         .map_err(|a| a.into())
         .map(|a| a.into())
-}
-
-fn decrypt_server_request(
-    to_decrypt: &str,
-    key: &str,
-) -> Result<String, ServerError> {
-    let text = base64::engine::general_purpose::URL_SAFE
-        .decode(to_decrypt)
-        .map_err(|e| {
-            error!("Error while decoding to_decrypt: {:?}", e);
-            ServerError::BadRequest
-        })?;
-
-    let mut my_key = [0; 16];
-    my_key.copy_from_slice(&key.as_bytes()[..16]);
-
-    let mut cipher = libaes::Cipher::new_128(&my_key);
-    cipher.set_auto_padding(false);
-    const CRYPTO_IV: &str = "jXT#/vz]3]5X7Jl\\";
-    let decrypted = cipher.cbc_decrypt(CRYPTO_IV.as_bytes(), &text);
-
-    String::from_utf8(decrypted).map_err(|e| {
-        error!("Error while converting decrypted text to UTF-8: {:?}", e);
-        ServerError::BadRequest
-    })
 }
 
 #[derive(Debug)]

@@ -2,13 +2,13 @@ use command::{poll, CommandArguments, Portrait};
 use fastrand::Rng;
 use num_traits::FromPrimitive;
 use request::Session;
-use sf_api::gamestate::character::{Class, Gender, Race};
+use sf_api::{
+    gamestate::character::{Class, Gender, Race},
+    misc::{sha1_hash, HASH_CONST},
+};
 use sqlx::Sqlite;
 
-use crate::{
-    misc::{sha1_hash, OptionGet, HASH_CONST},
-    *,
-};
+use crate::{misc::OptionGet, *};
 
 pub(crate) async fn account_check(
     db: &sqlx::Pool<Sqlite>,
@@ -63,7 +63,7 @@ pub(crate) async fn account_create(
     }
 
     // TODO: Do some more input validation
-    let hashed_password = sha1_hash(&format!("{password}{HASH_CONST}"));
+    let hashed_password = sha1_hash(&format!("{password}{}", HASH_CONST));
 
     let mut crypto_id = "0-".to_string();
     for _ in 2..DEFAULT_CRYPTO_ID.len() {
