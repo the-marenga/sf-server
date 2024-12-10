@@ -23,7 +23,7 @@ use super::{
     effective_mount, in_seconds, now, poll, xp_for_next_level,
     CommandArguments, Portrait, ResponseBuilder, ServerError, ServerResponse,
 };
-use crate::request::Session;
+use crate::{command::player, request::Session};
 
 pub(crate) async fn player_mount_buy(
     session: Session,
@@ -901,192 +901,16 @@ pub(crate) async fn player_arena_fight(
         }
     }
 
+    resp.add_key("fight.r");
+
     let mut bf_left = [battle_fighters.get(0).unwrap().clone()];
     let mut bf_right = [battle_fighters.get(1).unwrap().clone()];
     let mut battle: Battle = Battle::new(&mut bf_left, &mut bf_right);
-    let mut logger = MyCustomLogger {
-        result: Vec::new(),
-    };
-
+    let mut logger = MyCustomLogger::new(resp, [fighters[0], fighters[1]]);
+    
     battle.simulate(&mut logger);
-
-    // for ref mut r in 0.. {
-    // logger.0.clear();
-    // battle.simulate_turn(&mut logger);
-    // if *r == 0 {
-    // r = if battle.started.unwrap() == BattleSide::Left {
-    // 2
-    // } else {
-    // 1
-    // };
-    // }
-    // let right_hp = match battle.right.current() {
-    // Some(f) => f.current_hp,
-    // None => 0,
-    // };
-    // let left_hp = match battle.left.current() {
-    // Some(f) => f.current_hp,
-    // None => 0,
-    // };
-    // println!("# Turn {:?}", logger.0.last().unwrap());
-    // resp.add_val(fighters[(*r % 2) as usize]);
-    // resp.add_val(0);
-    // resp.add_val(0); // Attack type (normal=0, crit=1, catapult, etc.)
-    // resp.add_val(0); // Enemy reaction (repelled/dodged)
-    // resp.add_val(0);
-    // if *r % 2 == 0 {
-    // ugly
-    // resp.add_val(right_hp);
-    // resp.add_val(left_hp);
-    // } else {
-    // resp.add_val(left_hp);
-    // resp.add_val(right_hp);
-    // }
-    // resp.add_val(0);
-    // resp.add_val(0);
-    // if left_hp <= 0 || right_hp <= 0 {
-    // break;
-    // }
-    // }
-
-    //  pub enum BattleEvent<'a, 'b> {
-    // TurnUpdate(&'a Battle<'b>),
-    // BattleEnd(&'a Battle<'b>, BattleSide),
-    // Attack(&'b BattleFighter, &'b BattleFighter, AttackType),
-    // Dodged(&'b BattleFighter, &'b BattleFighter),
-    // Blocked(&'b BattleFighter, &'b BattleFighter),
-    // Crit(&'b BattleFighter, &'b BattleFighter),
-    // DamageReceived(&'b BattleFighter, &'b BattleFighter, i64),
-    // DemonHunterRevived(&'b BattleFighter, &'b BattleFighter),
-    // CometRepelled(&'b BattleFighter, &'b BattleFighter),
-    // CometAttack(&'b BattleFighter, &'b BattleFighter),
-    // MinionSpawned(&'b BattleFighter, &'b BattleFighter, Minion),
-    // MinionSkeletonRevived(&'b BattleFighter, &'b BattleFighter),
-    // BardPlay(&'b BattleFighter, &'b BattleFighter, HarpQuality),
-    // FighterDefeat(&'a Battle<'b>, BattleSide),
-    // }
-
-    resp.add_key("fight.r");
-
-    let mut msg_attack_type = 0;
-    let mut msg_enemy_reaction = 0;
-    let mut msg_from_hp = 9999999;
-    let mut msg_to_hp = 9999999;
-
-    let started = battle.started.unwrap();
-    let mut initial_turn = true;
-    let mut player_turn = if started == BattleSide::Left { 0 } else { 1 };
-    for e in logger.result.iter() {
-        match e {
-            BattleEvent::TurnUpdate(b) => {
-                if initial_turn {
-                    initial_turn = false;
-                    continue;
-                }
-                println!("#### Turn update ####");
-                let right_hp = match b.right.current() {
-                    Some(f) => f.current_hp,
-                    None => 0,
-                };
-                let left_hp = match (*b).left.current() {
-                    Some(f) => f.current_hp,
-                    None => 0,
-                };
-                println!("Left: {:?}, Right: {:?}", left_hp, right_hp);
-                resp.add_val(fighters[player_turn % 2]);
-                resp.add_val(0);
-                resp.add_val(msg_attack_type); // Attack type (normal=0, crit=1, catapult, etc.)
-                resp.add_val(msg_enemy_reaction); // Enemy reaction (repelled/dodged)
-                resp.add_val(0);
-                // ugly
-                if player_turn % 2 == 0 {
-                    resp.add_val(left_hp); // Attacker hp
-                    resp.add_val(right_hp); // Defender hp
-                } else {
-                    resp.add_val(right_hp); // Attacker hp
-                    resp.add_val(left_hp); // Defender hp
-                }
-                resp.add_val(0);
-                resp.add_val(0);
-                // and reset for next turn
-                player_turn += 1;
-                msg_attack_type = 0;
-                msg_enemy_reaction = 0;
-            }
-            BattleEvent::BattleEnd(b, side) => {}
-            BattleEvent::Attack(from, to, attack_type) => {
-                println!(
-                    "Attack (from {:?} to {:?} (Attack-Type: {:?})",
-                    from.class, to.class, attack_type as i32
-                );
-                // nothing to do, 0 is default & we dont wanna override crits
-            }
-            BattleEvent::Dodged(from, to) => {
-                println!("Dodged (from {:?} to {:?})", from.class, to.class);
-                msg_enemy_reaction = 1;
-            }
-            BattleEvent::Blocked(from, to) => {
-                println!("Blocked (from {:?} to {:?})", from.class, to.class);
-                msg_enemy_reaction = 2;
-            }
-            BattleEvent::Crit(from, to) => {
-                println!("Crit (from {:?} to {:?})", from.class, to.class);
-                msg_attack_type = 1;
-            }
-            BattleEvent::DamageReceived(from, to, dmg) => {
-                println!(
-                    "Damage received (from {:?} to {:?} (dmg: {:?})",
-                    from.class, to.class, dmg
-                );
-                msg_from_hp = from.current_hp;
-                msg_to_hp = to.current_hp;
-            }
-            BattleEvent::DemonHunterRevived(from, to) => {
-                println!(
-                    "Demon Hunter Revived (from {:?} to {:?})",
-                    from.class, to.class
-                );
-            }
-            BattleEvent::CometRepelled(from, to) => {
-                println!(
-                    "Comet Repelled (from {:?} to {:?})",
-                    from.class, to.class
-                );
-                msg_enemy_reaction = 3;
-            }
-            BattleEvent::CometAttack(from, to) => {
-                println!(
-                    "Comet Attack (from {:?} to {:?})",
-                    from.class, to.class
-                );
-                msg_attack_type = 10;
-            }
-            BattleEvent::MinionSpawned(from, to, minion) => {
-                println!(
-                    "Minion Spawned (from {:?} to {:?} (minion: {:?})",
-                    from.class, to.class, minion
-                );
-            }
-            BattleEvent::MinionSkeletonRevived(from, to) => {
-                println!(
-                    "Minion Skeleton Revived (from {:?} to {:?})",
-                    from.class, to.class
-                );
-            }
-            BattleEvent::BardPlay(from, to, quality) => {
-                println!(
-                    "Bard Play (from {:?} to {:?} (quality: {:?})",
-                    from.class, to.class, quality
-                );
-            }
-            BattleEvent::FighterDefeat(b, side) => {
-                println!("Fighter Defeat (side: {:?})", side);
-            }
-            _ => {
-                // log::error!("Unknown event: {:?}\n\nOccured during battle {:?}\n\nBattle log: {:?}", e, battle, logger.0);
-            }
-        }
-    }
+    resp = logger.response;
+    
     let left_hp = match battle.left.current() {
         Some(f) => f.current_hp,
         None => 0,
@@ -1115,17 +939,36 @@ pub(crate) async fn player_arena_fight(
     resp.build()
 }
 
-struct MyCustomLogger<'a> {
-    result: Vec<BattleEvent<'a, 'a>>,
+struct MyCustomLogger {
+    response: ResponseBuilder,
+    fighter_ids: [i64; 2],
+    player_turn: i64,
+    msg_attack_type: i64,
+    msg_enemy_reaction: i64,
 }
 
-impl BattleLogger for MyCustomLogger<'_> {
-    fn log(&mut self, event: BattleEvent<'_, '_>) {
-        let e: BattleEvent<'_, '_> = BattleEvent::clone(&event);
-        match e {
+impl MyCustomLogger {
+    fn new(response: ResponseBuilder, fighter_ids: [i64; 2]) -> Self {
+        Self {
+            response,
+            fighter_ids,
+            player_turn: -1,
+            msg_attack_type: 0,
+            msg_enemy_reaction: 0,
+        }
+    }
+}
+
+impl BattleLogger for MyCustomLogger {
+    fn log(&mut self, event: BattleEvent) {
+        match event {
             BattleEvent::TurnUpdate(b) => {
-                if initial_turn {
-                    initial_turn = false;
+                if self.player_turn == -1 {
+                    self.player_turn = 0;
+                    return;
+                } else if self.player_turn == 0 {
+                    let first = b.started.unwrap();
+                    self.player_turn = if first == BattleSide::Left { 0 } else { 1 };
                 }
                 println!("#### Turn update ####");
                 let right_hp = match b.right.current() {
@@ -1137,25 +980,25 @@ impl BattleLogger for MyCustomLogger<'_> {
                     None => 0,
                 };
                 println!("Left: {:?}, Right: {:?}", left_hp, right_hp);
-                resp.add_val(fighters[player_turn % 2]);
-                resp.add_val(0);
-                resp.add_val(msg_attack_type); // Attack type (normal=0, crit=1, catapult, etc.)
-                resp.add_val(msg_enemy_reaction); // Enemy reaction (repelled/dodged)
-                resp.add_val(0);
+                self.response.add_val(self.fighter_ids[((self.player_turn + 2) % 2) as usize]);
+                self.response.add_val(0);
+                self.response.add_val(self.msg_attack_type); // Attack type (normal=0, crit=1, catapult, etc.)
+                self.response.add_val(self.msg_enemy_reaction); // Enemy reaction (repelled/dodged)
+                self.response.add_val(0);
                 // ugly
-                if player_turn % 2 == 0 {
-                    resp.add_val(left_hp); // Attacker hp
-                    resp.add_val(right_hp); // Defender hp
+                if self.player_turn % 2 == 0 {
+                    self.response.add_val(left_hp); // Attacker hp
+                    self.response.add_val(right_hp); // Defender hp
                 } else {
-                    resp.add_val(right_hp); // Attacker hp
-                    resp.add_val(left_hp); // Defender hp
+                    self.response.add_val(right_hp); // Attacker hp
+                    self.response.add_val(left_hp); // Defender hp
                 }
-                resp.add_val(0);
-                resp.add_val(0);
+                self.response.add_val(0);
+                self.response.add_val(0);
                 // and reset for next turn
-                player_turn += 1;
-                msg_attack_type = 0;
-                msg_enemy_reaction = 0;
+                self.player_turn += 1;
+                self.msg_attack_type = 0;
+                self.msg_enemy_reaction = 0;
             }
             BattleEvent::BattleEnd(b, side) => {}
             BattleEvent::Attack(from, to, attack_type) => {
@@ -1167,23 +1010,21 @@ impl BattleLogger for MyCustomLogger<'_> {
             }
             BattleEvent::Dodged(from, to) => {
                 println!("Dodged (from {:?} to {:?})", from.class, to.class);
-                msg_enemy_reaction = 1;
+                self.msg_enemy_reaction = 1;
             }
             BattleEvent::Blocked(from, to) => {
                 println!("Blocked (from {:?} to {:?})", from.class, to.class);
-                msg_enemy_reaction = 2;
+                self.msg_enemy_reaction = 2;
             }
             BattleEvent::Crit(from, to) => {
                 println!("Crit (from {:?} to {:?})", from.class, to.class);
-                msg_attack_type = 1;
+                self.msg_attack_type = 1;
             }
             BattleEvent::DamageReceived(from, to, dmg) => {
                 println!(
                     "Damage received (from {:?} to {:?} (dmg: {:?})",
                     from.class, to.class, dmg
                 );
-                msg_from_hp = from.current_hp;
-                msg_to_hp = to.current_hp;
             }
             BattleEvent::DemonHunterRevived(from, to) => {
                 println!(
@@ -1196,14 +1037,14 @@ impl BattleLogger for MyCustomLogger<'_> {
                     "Comet Repelled (from {:?} to {:?})",
                     from.class, to.class
                 );
-                msg_enemy_reaction = 3;
+                self.msg_enemy_reaction = 3;
             }
             BattleEvent::CometAttack(from, to) => {
                 println!(
                     "Comet Attack (from {:?} to {:?})",
                     from.class, to.class
                 );
-                msg_attack_type = 10;
+                self.msg_attack_type = 10;
             }
             BattleEvent::MinionSpawned(from, to, minion) => {
                 println!(
