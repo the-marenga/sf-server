@@ -1,11 +1,17 @@
 use std::fmt::Write;
 
+use enum_map::{enum_map, EnumMap};
 use fastrand::Rng;
 use log::error;
 use num_traits::FromPrimitive;
 use sf_api::{
-    gamestate::character::{Gender, Race},
+    command::AttributeType,
+    gamestate::{
+        character::{Class, Gender, Race},
+        items::Potion,
+    },
     misc::from_sf_string,
+    simulate::{Battle, BattleFighter, BattleSide, UpgradeableFighter},
 };
 use sqlx::Sqlite;
 
@@ -795,26 +801,66 @@ pub(crate) async fn player_arena_fight(
 
     let fighters = [session.player_id, enemy_id];
 
-    let starting_hp = 10_000;
+    let mut battle_fighters = Vec::with_capacity(2);
 
     for pid in fighters {
         let fighter = sqlx::query!(
-            "SELECT name, portrait.*, a.*, level, class, race, gender
+            "SELECT name, portrait.*, a.*, ab.strength AS strengthb,
+                    ab.dexterity AS dexterityb, ab.intelligence AS \
+             intelligenceb,
+                    ab.stamina AS staminab, ab.luck AS luckb, level, class, \
+             race,
+                    gender
             FROM character c
             NATURAL JOIN portrait
-            JOIN attributes a on a.id = c.attributes
+            JOIN attributes a ON a.id = c.attributes
+            JOIN attributes ab ON ab.id = c.attributes_bought
             WHERE pid = $1",
             pid
         )
         .fetch_one(db)
         .await?;
 
-        // Player a info
+        let attr: EnumMap<AttributeType, u32> = enum_map! {
+            AttributeType::Strength => fighter.strength as u32,
+            AttributeType::Dexterity => fighter.dexterity as u32,
+            AttributeType::Intelligence => fighter.intelligence as u32,
+            AttributeType::Constitution => fighter.stamina as u32,
+            AttributeType::Luck => fighter.luck as u32,
+        };
+
+        let attr_bought: EnumMap<AttributeType, u32> = enum_map! {
+            AttributeType::Strength => fighter.strengthb as u32,
+            AttributeType::Dexterity => fighter.dexterityb as u32,
+            AttributeType::Intelligence => fighter.intelligenceb as u32,
+            AttributeType::Constitution => fighter.staminab as u32,
+            AttributeType::Luck => fighter.luckb as u32,
+        };
+
+        let potions: [Option<Potion>; 3] = Default::default();
+
+        let upgradeable_fighter = UpgradeableFighter {
+            is_companion: false,
+            level: fighter.level as u16,
+            class: Class::from_i64(fighter.class).unwrap(),
+            attribute_basis: attr,
+            _attributes_bought: attr_bought,
+            pet_attribute_bonus_perc: EnumMap::default(), // TODO
+            equipment: Default::default(),                // TODO
+            active_potions: potions,                      // TODO
+            portal_hp_bonus: 0,                           // TODO
+            portal_dmg_bonus: 0,                          // TODO
+        };
+
+        let bf = BattleFighter::from_upgradeable(&upgradeable_fighter);
+        battle_fighters.push(bf.clone());
+
+        // Player info
         resp.add_val(fighter.pid);
         resp.add_str(&fighter.name);
         resp.add_val(fighter.level);
-        resp.add_val(starting_hp); // TODO: Calc their hp
-        resp.add_val(starting_hp); // TODO: Calc their hp
+        resp.add_val(bf.max_hp);
+        resp.add_val(bf.max_hp);
         resp.add_val(fighter.strength); // str
         resp.add_val(fighter.dexterity); // dex
         resp.add_val(fighter.intelligence); // int
@@ -854,42 +900,64 @@ pub(crate) async fn player_arena_fight(
 
     resp.add_key("fight.r");
 
-    let mut player_a_hp = starting_hp;
-    let mut player_b_hp = starting_hp;
+    let mut bf_left = [battle_fighters.get(0).unwrap().clone()];
+    let mut bf_right = [battle_fighters.get(1).unwrap().clone()];
+    let mut battle: Battle = Battle::new(&mut bf_left, &mut bf_right);
 
-    let mut rng = fastrand::Rng::new();
-    for round in 0.. {
-        let (pid, our_hp, enemy_hp) = if round % 2 == 0 {
-            (fighters[0], &mut player_a_hp, &mut player_b_hp)
-        } else {
-            (fighters[1], &mut player_b_hp, &mut player_a_hp)
+    let start_r = if battle.started.unwrap() == BattleSide::Left {
+        0
+    } else {
+        1
+    };
+
+    for r in start_r.. {
+        battle.simulate_turn(&mut ());
+        let right_hp = match battle.right.current() {
+            Some(f) => f.current_hp,
+            None => 0,
         };
-        *enemy_hp -= rng.i32(2_000..=4_000);
-        resp.add_val(pid);
+        let left_hp = match battle.left.current() {
+            Some(f) => f.current_hp,
+            None => 0,
+        };
+        println!("Turn {}: Left: {}, Right: {}", r, left_hp, right_hp);
+        resp.add_val(fighters[(r % 2) as usize]);
         resp.add_val(0);
-        resp.add_val(1); // Attack type (weapon, catapult, etc.)
+        resp.add_val(0); // Attack type (normal=0, crit=1, catapult, etc.)
         resp.add_val(0); // Enemy reaction (repelled/dodged)
         resp.add_val(0);
-        resp.add_val(*our_hp);
-        resp.add_val(*enemy_hp);
+        if r % 2 == 0 {
+            // ugly
+            resp.add_val(right_hp);
+            resp.add_val(left_hp);
+        } else {
+            resp.add_val(left_hp);
+            resp.add_val(right_hp);
+        }
         resp.add_val(0);
         resp.add_val(0);
-        if player_a_hp <= 0 || player_b_hp <= 0 {
+        if left_hp <= 0 || right_hp <= 0 {
             break;
         }
     }
+
+    let left_hp = match battle.left.current() {
+        Some(f) => f.current_hp,
+        None => 0,
+    };
+
     resp.add_key("winnerid");
-    resp.add_val(if player_a_hp > 0 {
+    resp.add_val(if left_hp > 0 {
         fighters[0]
     } else {
         fighters[1]
     });
     resp.add_key("fightresult.battlereward");
-    resp.add_val((player_a_hp > 0) as i32); // have we won?
+    resp.add_val((left_hp > 0) as i32); // have we won?
     resp.add_val(1);
     resp.add_val(0); // silver
-    resp.add_val(1000); // xp won
-    resp.add_val(100); // mushrooms
+    resp.add_val(0); // xp won
+    resp.add_val(if left_hp > 0 { 1337 } else { 0 }); // mushrooms
     resp.add_val(0); // honor won
     resp.add_val(0);
     resp.add_val(2); // rank pre
