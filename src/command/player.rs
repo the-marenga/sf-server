@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt::Write};
+use std::fmt::Write;
 
 use enum_map::{enum_map, EnumMap};
 use fastrand::Rng;
@@ -12,7 +12,8 @@ use sf_api::{
     },
     misc::from_sf_string,
     simulate::{
-        AttackType, Battle, BattleEvent, BattleFighter, BattleLogger, BattleSide, BattleTeam, UpgradeableFighter
+        AttackType, Battle, BattleEvent, BattleFighter, BattleLogger,
+        BattleSide, BattleTeam, UpgradeableFighter,
     },
 };
 use sqlx::Sqlite;
@@ -22,7 +23,7 @@ use super::{
     effective_mount, in_seconds, now, poll, xp_for_next_level,
     CommandArguments, Portrait, ResponseBuilder, ServerError, ServerResponse,
 };
-use crate::{command::player, request::Session};
+use crate::request::Session;
 
 pub(crate) async fn player_mount_buy(
     session: Session,
@@ -941,7 +942,7 @@ pub(crate) async fn player_arena_fight(
 struct MyCustomLogger {
     response: ResponseBuilder,
     fighter_ids: [i64; 2],
-    player_turn: i64,
+    player_turn: usize,
     msg_skill_type: i64,
     msg_attack_type: i64,
     msg_enemy_reaction: i64,
@@ -959,7 +960,7 @@ impl MyCustomLogger {
         }
     }
 
-    fn arena_fight_add_attack(
+    fn add_attack(
         &mut self,
         from: Option<&BattleFighter>,
         to: Option<&BattleFighter>,
@@ -972,12 +973,15 @@ impl MyCustomLogger {
             Some(f) => f.current_hp,
             None => 0,
         };
-        println!("From {}: {:?}, To: {:?}", self.fighter_ids[(self.player_turn % 2) as usize], from_hp, to_hp);
+        println!(
+            "From {}: {:?}, To: {:?}",
+            self.fighter_ids[self.player_turn], from_hp, to_hp
+        );
 
         if from.unwrap().class == Class::Druid && self.msg_attack_type != 1 {
             self.msg_skill_type = 10;
         }
-        self.response.add_val(self.fighter_ids[(self.player_turn % 2) as usize]);
+        self.response.add_val(self.fighter_ids[self.player_turn]);
         self.response.add_val(self.msg_skill_type); // or maybe smth like "strength of attack"
         self.response.add_val(self.msg_attack_type); // Attack type (normal=0, crit=1, catapult, etc.)
         self.response.add_val(self.msg_enemy_reaction); // Enemy reaction (repelled/dodged)
@@ -1000,8 +1004,7 @@ impl BattleLogger for MyCustomLogger {
                 println!("#### Turn update ####");
                 self.player_turn = if side == BattleSide::Left { 0 } else { 1 };
             }
-            BattleEvent::BattleEnd(b, side) => {
-            }
+            BattleEvent::BattleEnd(b, side) => {}
             BattleEvent::Attack(from, to, attack_type) => {
                 println!(
                     "Attack (from {:?} to {:?} (Attack-Type: {:?})",
@@ -1015,12 +1018,12 @@ impl BattleLogger for MyCustomLogger {
             BattleEvent::Dodged(from, to) => {
                 println!("Dodged (from {:?} to {:?})", from.class, to.class);
                 self.msg_enemy_reaction = 1;
-                self.arena_fight_add_attack(Some(from), Some(to));
+                self.add_attack(Some(from), Some(to));
             }
             BattleEvent::Blocked(from, to) => {
                 println!("Blocked (from {:?} to {:?})", from.class, to.class);
                 self.msg_enemy_reaction = 2;
-                self.arena_fight_add_attack(Some(from), Some(to));
+                self.add_attack(Some(from), Some(to));
             }
             BattleEvent::Crit(from, to) => {
                 println!("Crit (from {:?} to {:?})", from.class, to.class);
@@ -1031,7 +1034,7 @@ impl BattleLogger for MyCustomLogger {
                     "Damage received (from {:?} to {:?} (dmg: {:?})",
                     from.class, to.class, dmg
                 );
-                self.arena_fight_add_attack(Some(from), Some(to));
+                self.add_attack(Some(from), Some(to));
             }
             BattleEvent::DemonHunterRevived(from, to) => {
                 println!(
@@ -1045,7 +1048,7 @@ impl BattleLogger for MyCustomLogger {
                     from.class, to.class
                 );
                 self.msg_enemy_reaction = 3;
-                self.arena_fight_add_attack(Some(from), Some(to));
+                self.add_attack(Some(from), Some(to));
             }
             BattleEvent::CometAttack(from, to) => {
                 println!(
@@ -1081,4 +1084,3 @@ impl BattleLogger for MyCustomLogger {
         }
     }
 }
-
