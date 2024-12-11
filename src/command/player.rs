@@ -952,7 +952,7 @@ impl MyCustomLogger {
         Self {
             response,
             fighter_ids,
-            player_turn: -1,
+            player_turn: 0,
             msg_skill_type: 0,
             msg_attack_type: 0,
             msg_enemy_reaction: 0,
@@ -972,9 +972,9 @@ impl MyCustomLogger {
             Some(f) => f.current_hp,
             None => 0,
         };
-        println!("From {}: {:?}, To: {:?}", (self.player_turn % 2), from_hp, to_hp);
+        println!("From {}: {:?}, To: {:?}", self.fighter_ids[(self.player_turn % 2) as usize], from_hp, to_hp);
 
-        if from.unwrap().class == Class::Druid {
+        if from.unwrap().class == Class::Druid && self.msg_attack_type != 1 {
             self.msg_skill_type = 10;
         }
         self.response.add_val(self.fighter_ids[(self.player_turn % 2) as usize]);
@@ -996,18 +996,9 @@ impl MyCustomLogger {
 impl BattleLogger for MyCustomLogger {
     fn log(&mut self, event: BattleEvent) {
         match event {
-            BattleEvent::TurnUpdate(b) => {
-                if self.player_turn == -1 {
-                    self.player_turn = 0;
-                    return;
-                } else if self.player_turn == 0 {
-                    let first = b.started.unwrap();
-                    self.player_turn =
-                        if first == BattleSide::Left { 2 } else { 1 };
-                }
+            BattleEvent::TurnUpdate(side) => {
                 println!("#### Turn update ####");
-
-                self.player_turn += 1;
+                self.player_turn = if side == BattleSide::Left { 0 } else { 1 };
             }
             BattleEvent::BattleEnd(b, side) => {
             }
