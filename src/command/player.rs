@@ -1025,10 +1025,7 @@ impl BattleLogger for MyCustomLogger {
             }
             BattleEvent::Dodged(from, to) => {
                 println!("Dodged (from {:?} to {:?})", from.class, to.class);
-                self.msg_enemy_reaction = 1;
-                if to.class == Class::Druid {
-                    self.msg_enemy_reaction = 4;
-                }
+                self.msg_enemy_reaction = 4;
                 self.add_attack(Some(from), Some(to));
             }
             BattleEvent::Blocked(from, to) => {
