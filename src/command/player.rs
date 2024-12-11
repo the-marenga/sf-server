@@ -907,10 +907,10 @@ pub(crate) async fn player_arena_fight(
     let mut bf_right = [battle_fighters.get(1).unwrap().clone()];
     let mut battle: Battle = Battle::new(&mut bf_left, &mut bf_right);
     let mut logger = MyCustomLogger::new(resp, [fighters[0], fighters[1]]);
-    
+
     battle.simulate(&mut logger);
     resp = logger.response;
-    
+
     let left_hp = match battle.left.current() {
         Some(f) => f.current_hp,
         None => 0,
@@ -968,7 +968,8 @@ impl BattleLogger for MyCustomLogger {
                     return;
                 } else if self.player_turn == 0 {
                     let first = b.started.unwrap();
-                    self.player_turn = if first == BattleSide::Left { 0 } else { 1 };
+                    self.player_turn =
+                        if first == BattleSide::Left { 2 } else { 1 };
                 }
                 println!("#### Turn update ####");
                 let right_hp = match b.right.current() {
