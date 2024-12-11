@@ -13,7 +13,7 @@ use sf_api::{
     misc::from_sf_string,
     simulate::{
         AttackType, Battle, BattleEvent, BattleFighter, BattleLogger,
-        BattleSide, BattleTeam, UpgradeableFighter,
+        BattleSide, BattleTeam, ClassEffect, UpgradeableFighter,
     },
 };
 use sqlx::Sqlite;
@@ -978,8 +978,16 @@ impl MyCustomLogger {
             self.fighter_ids[self.player_turn], from_hp, to_hp
         );
 
-        if from.unwrap().class == Class::Druid && self.msg_attack_type != 1 {
-            self.msg_skill_type = 10;
+        if from.unwrap().class == Class::Druid {
+            match from.unwrap().class_effect {
+                ClassEffect::Druid { bear: true, .. } => {
+                    self.msg_skill_type = 11;
+                    self.msg_attack_type = 1;
+                }
+                _ => {
+                    self.msg_skill_type = 10;
+                }
+            }
         }
         self.response.add_val(self.fighter_ids[self.player_turn]);
         self.response.add_val(self.msg_skill_type); // or maybe smth like "strength of attack"
@@ -1018,6 +1026,9 @@ impl BattleLogger for MyCustomLogger {
             BattleEvent::Dodged(from, to) => {
                 println!("Dodged (from {:?} to {:?})", from.class, to.class);
                 self.msg_enemy_reaction = 1;
+                if to.class == Class::Druid {
+                    self.msg_enemy_reaction = 4;
+                }
                 self.add_attack(Some(from), Some(to));
             }
             BattleEvent::Blocked(from, to) => {
