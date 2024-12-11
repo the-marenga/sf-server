@@ -12,8 +12,7 @@ use sf_api::{
     },
     misc::from_sf_string,
     simulate::{
-        AttackType, Battle, BattleEvent, BattleFighter, BattleLogger,
-        BattleSide, UpgradeableFighter,
+        AttackType, Battle, BattleEvent, BattleFighter, BattleLogger, BattleSide, BattleTeam, UpgradeableFighter
     },
 };
 use sqlx::Sqlite;
@@ -845,7 +844,7 @@ pub(crate) async fn player_arena_fight(
         let upgradeable_fighter = UpgradeableFighter {
             is_companion: false,
             level: fighter.level as u16,
-            class: Class::from_i64(fighter.class).unwrap(),
+            class: Class::from_i64(fighter.class - 1).unwrap(),
             attribute_basis: attr,
             _attributes_bought: attr_bought,
             pet_attribute_bonus_perc: EnumMap::default(), // TODO
@@ -943,6 +942,7 @@ struct MyCustomLogger {
     response: ResponseBuilder,
     fighter_ids: [i64; 2],
     player_turn: i64,
+    msg_skill_type: i64,
     msg_attack_type: i64,
     msg_enemy_reaction: i64,
 }
@@ -953,9 +953,43 @@ impl MyCustomLogger {
             response,
             fighter_ids,
             player_turn: -1,
+            msg_skill_type: 0,
             msg_attack_type: 0,
             msg_enemy_reaction: 0,
         }
+    }
+
+    fn arena_fight_add_attack(
+        &mut self,
+        from: Option<&BattleFighter>,
+        to: Option<&BattleFighter>,
+    ) {
+        let from_hp = match from {
+            Some(f) => f.current_hp,
+            None => 0,
+        };
+        let to_hp = match to {
+            Some(f) => f.current_hp,
+            None => 0,
+        };
+        println!("From {}: {:?}, To: {:?}", (self.player_turn % 2), from_hp, to_hp);
+
+        if from.unwrap().class == Class::Druid {
+            self.msg_skill_type = 10;
+        }
+        self.response.add_val(self.fighter_ids[(self.player_turn % 2) as usize]);
+        self.response.add_val(self.msg_skill_type); // or maybe smth like "strength of attack"
+        self.response.add_val(self.msg_attack_type); // Attack type (normal=0, crit=1, catapult, etc.)
+        self.response.add_val(self.msg_enemy_reaction); // Enemy reaction (repelled/dodged)
+        self.response.add_val(0);
+        self.response.add_val(from_hp); // Attacker hp
+        self.response.add_val(to_hp); // Defender hp
+        self.response.add_val(0);
+        self.response.add_val(0);
+
+        self.msg_skill_type = 0;
+        self.msg_attack_type = 0;
+        self.msg_enemy_reaction = 0;
     }
 }
 
@@ -972,50 +1006,30 @@ impl BattleLogger for MyCustomLogger {
                         if first == BattleSide::Left { 2 } else { 1 };
                 }
                 println!("#### Turn update ####");
-                let right_hp = match b.right.current() {
-                    Some(f) => f.current_hp,
-                    None => 0,
-                };
-                let left_hp = match (*b).left.current() {
-                    Some(f) => f.current_hp,
-                    None => 0,
-                };
-                println!("Left: {:?}, Right: {:?}", left_hp, right_hp);
-                self.response.add_val(self.fighter_ids[((self.player_turn + 2) % 2) as usize]);
-                self.response.add_val(0);
-                self.response.add_val(self.msg_attack_type); // Attack type (normal=0, crit=1, catapult, etc.)
-                self.response.add_val(self.msg_enemy_reaction); // Enemy reaction (repelled/dodged)
-                self.response.add_val(0);
-                // ugly
-                if self.player_turn % 2 == 0 {
-                    self.response.add_val(left_hp); // Attacker hp
-                    self.response.add_val(right_hp); // Defender hp
-                } else {
-                    self.response.add_val(right_hp); // Attacker hp
-                    self.response.add_val(left_hp); // Defender hp
-                }
-                self.response.add_val(0);
-                self.response.add_val(0);
-                // and reset for next turn
+
                 self.player_turn += 1;
-                self.msg_attack_type = 0;
-                self.msg_enemy_reaction = 0;
             }
-            BattleEvent::BattleEnd(b, side) => {}
+            BattleEvent::BattleEnd(b, side) => {
+            }
             BattleEvent::Attack(from, to, attack_type) => {
                 println!(
                     "Attack (from {:?} to {:?} (Attack-Type: {:?})",
-                    from.class, to.class, attack_type as i32
+                    from.class, to.class, attack_type
                 );
+                if attack_type == AttackType::Swoop {
+                    self.msg_attack_type = 13;
+                }
                 // nothing to do, 0 is default & we dont wanna override crits
             }
             BattleEvent::Dodged(from, to) => {
                 println!("Dodged (from {:?} to {:?})", from.class, to.class);
                 self.msg_enemy_reaction = 1;
+                self.arena_fight_add_attack(Some(from), Some(to));
             }
             BattleEvent::Blocked(from, to) => {
                 println!("Blocked (from {:?} to {:?})", from.class, to.class);
                 self.msg_enemy_reaction = 2;
+                self.arena_fight_add_attack(Some(from), Some(to));
             }
             BattleEvent::Crit(from, to) => {
                 println!("Crit (from {:?} to {:?})", from.class, to.class);
@@ -1026,6 +1040,7 @@ impl BattleLogger for MyCustomLogger {
                     "Damage received (from {:?} to {:?} (dmg: {:?})",
                     from.class, to.class, dmg
                 );
+                self.arena_fight_add_attack(Some(from), Some(to));
             }
             BattleEvent::DemonHunterRevived(from, to) => {
                 println!(
@@ -1039,6 +1054,7 @@ impl BattleLogger for MyCustomLogger {
                     from.class, to.class
                 );
                 self.msg_enemy_reaction = 3;
+                self.arena_fight_add_attack(Some(from), Some(to));
             }
             BattleEvent::CometAttack(from, to) => {
                 println!(
@@ -1074,3 +1090,4 @@ impl BattleLogger for MyCustomLogger {
         }
     }
 }
+
