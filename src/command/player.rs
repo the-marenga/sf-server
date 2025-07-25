@@ -113,7 +113,7 @@ pub(crate) async fn player_whisper(
     use clap::Parser;
     let command = CheatCmd::try_parse_from(args.get_str(1, "args")?.split(' '))
         .map_err(|e| {
-            error!("Error while parsing command: {:?}", e);
+            error!("Error while parsing command: {e:?}");
             ServerError::BadRequest
         })?;
     handle_cheat_command(session, db, command).await
@@ -567,7 +567,7 @@ pub(crate) async fn player_get_hof(
                 "bg"
             ))
             .map_err(|e| {
-                error!("Error while writing format: {:?}", e);
+                error!("Error while writing format: {e:?}");
                 ServerError::Internal
             })?;
     }

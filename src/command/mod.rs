@@ -50,7 +50,7 @@ pub(crate) async fn handle_command<'a>(
     session: Session,
 ) -> Result<ServerResponse, ServerError> {
     if name != "Poll" {
-        debug!("Received: {name}: {:?}", args);
+        debug!("Received: {name}: {args:?}");
     }
 
     if !session.can_request(name) {
@@ -86,7 +86,7 @@ pub(crate) async fn handle_command<'a>(
         "UserSettingsUpdate" => Ok(ServerResponse::Success), // TODO:
         "getserverversion" => get_server_version(session, db).await,
         _ => {
-            error!("Unknown command: {name} - {:?}", args);
+            error!("Unknown command: {name} - {args:?}");
             Err(ServerError::UnknownRequest(name.into()))
         }
     }

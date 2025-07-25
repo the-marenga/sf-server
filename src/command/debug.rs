@@ -71,7 +71,7 @@ pub(crate) async fn handle_cheat_command(
             .await?;
         }
         Command::SetPassword { new } => {
-            let hashed_password = sha1_hash(&format!("{new}{}", HASH_CONST));
+            let hashed_password = sha1_hash(&format!("{new}{HASH_CONST}"));
             let mut tx = db.begin().await?;
             sqlx::query!(
                 "UPDATE character as c

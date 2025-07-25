@@ -34,7 +34,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
     let client = get_client();
     let get_text = |url: String| async {
         let resp = client.get(url).send().await.map_err(|e| {
-            error!("Error while sending request: {:?}", e);
+            error!("Error while sending request: {e:?}");
             INTERNAL_ERR
         })?;
         let status = resp.status();
@@ -42,7 +42,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
             return Err(status);
         }
         resp.text().await.map_err(|e| {
-            error!("Error while reading response text: {:?}", e);
+            error!("Error while reading response text: {e:?}");
             INTERNAL_ERR
         })
     };
@@ -51,7 +51,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
         let text = get_text(sfgame_url()).await?;
         let mut json: HashMap<String, String> = serde_json::from_str(&text)
             .map_err(|e| {
-                error!("Error while parsing JSON: {:?}", e);
+                error!("Error while parsing JSON: {e:?}");
                 INTERNAL_ERR
             })?;
         let fw = json.get_mut("frameworkUrl").ok_or(INTERNAL_ERR)?;
@@ -66,7 +66,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
             .header(CONTENT_TYPE, "application/javascript")
             .body(axum::body::Body::from(fixed_framework))
             .map_err(|e| {
-                error!("Error while building response body: {:?}", e);
+                error!("Error while building response body: {e:?}");
                 INTERNAL_ERR
             })
     } else if uri == "/config.json" {
@@ -74,7 +74,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
         let text = get_text(sfgame_url()).await?;
         let mut config: SFConfig =
             serde_json::from_str(&text).map_err(|e| {
-                error!("Error while parsing config JSON: {:?}", e);
+                error!("Error while parsing config JSON: {e:?}");
                 INTERNAL_ERR
             })?;
 
@@ -86,7 +86,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
             .fetch_all(&db)
             .await
             .map_err(|e| {
-                error!("Database query error: {:?}", e);
+                error!("Database query error: {e:?}");
                 INTERNAL_ERR
             })?;
 
@@ -124,7 +124,7 @@ pub async fn forward(req: Request) -> Result<Response, StatusCode> {
         builder
             .body(axum::body::Body::from_stream(resp.bytes_stream()))
             .map_err(|e| {
-                error!("Error while building response body: {:?}", e);
+                error!("Error while building response body: {e:?}");
                 INTERNAL_ERR
             })
     }
