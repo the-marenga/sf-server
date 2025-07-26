@@ -1,10 +1,13 @@
-use command::{poll, CommandArguments, Portrait};
+use command::{CommandArguments, Portrait, poll};
 use fastrand::Rng;
 use num_traits::FromPrimitive;
 use request::Session;
 use sf_api::{
-    gamestate::character::{Class, Gender, Race},
-    misc::{sha1_hash, HASH_CONST},
+    gamestate::{
+        character::{Class, Gender, Race},
+        tavern::{ExpeditionThing, Location},
+    },
+    misc::{HASH_CONST, sha1_hash},
 };
 use sqlx::Sqlite;
 
@@ -109,6 +112,21 @@ pub(crate) async fn account_create(
     )
     .fetch_one(&mut *tx)
     .await?;
+
+    for _ in 0..2 {
+        let alu = [5, 10, 15, 20][fastrand::usize(0..4)] * 60;
+        sqlx::query_scalar!(
+            "INSERT INTO Expedition
+                (target, alu_sec, location_1, location_2)
+                VALUES ($1, $2, $3, $4)",
+            ExpeditionThing::BrokenSword as i32,
+            alu,
+            Location::SprawlingJungle as i32,
+            Location::SkullIsland as i32
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
 
     sqlx::query_scalar!("INSERT INTO BAG (pid) VALUES ($1)", pid)
         .execute(&mut *tx)

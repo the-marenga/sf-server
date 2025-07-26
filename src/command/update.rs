@@ -1,14 +1,20 @@
 use sf_api::{
-    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
+    command::AttributeType,
+    gamestate::{
+        items::EquipmentSlot,
+        tavern::{ExpeditionThing, Location},
+    },
+    misc::to_sf_string,
 };
 use sqlx::Sqlite;
 use strum::IntoEnumIterator;
 
 use super::{
-    effective_mount, get_debug_value_default, in_seconds, item::add_debug_item,
-    now, xp_for_next_level, ResponseBuilder, ServerError, ServerResponse,
+    ResponseBuilder, ServerError, ServerResponse, effective_mount,
+    get_debug_value_default, in_seconds, item::add_debug_item, now,
+    xp_for_next_level,
 };
-use crate::{request::Session, SERVER_VERSION};
+use crate::{SERVER_VERSION, request::Session};
 
 pub(crate) async fn poll(
     session: Session,
@@ -453,15 +459,15 @@ pub(crate) async fn poll(
     resp.add_val(0); // 544
     resp.add_val(0); // 545
     resp.add_val(0); // 546
-                     // unit counts
+    // unit counts
     resp.add_val(0); // 547
     resp.add_val(0); // 548
     resp.add_val(0); // 549
-                     // upgrade_began
+    // upgrade_began
     resp.add_val(0); // 550
     resp.add_val(0); // 551
     resp.add_val(0); // 552
-                     // upgrade_finish
+    // upgrade_finish
     resp.add_val(0); // 553
     resp.add_val(0); // 554
     resp.add_val(0); // 555
@@ -477,11 +483,11 @@ pub(crate) async fn poll(
     resp.add_val(0); // 562
     resp.add_val(0); // 563
     resp.add_val(0); // 564
-                     // max_in_building
+    // max_in_building
     resp.add_val(0); // 565
     resp.add_val(0); // 566
     resp.add_val(0); // 567
-                     // max saved
+    // max saved
     resp.add_val(0); // 568
     resp.add_val(0); // 569
     resp.add_val(0); // 570
@@ -489,7 +495,7 @@ pub(crate) async fn poll(
     resp.add_val(0); // 571 building_upgraded
     resp.add_val(0); // 572 building_upgrade_finish
     resp.add_val(0); // 573 building_upgrade_began
-                     // per hour
+    // per hour
     resp.add_val(0); // 574
     resp.add_val(0); // 575
     resp.add_val(0); // 576
@@ -696,7 +702,7 @@ pub(crate) async fn poll(
     resp.add_val(0); // metal
     resp.add_val(0); // arcane
     resp.add_val(0); // souls
-                     // Fruits
+    // Fruits
     for _ in 0..5 {
         resp.add_val(0);
     }
@@ -868,24 +874,27 @@ pub(crate) async fn poll(
 
     resp.skip_key();
 
-    resp.add_key("expeditions");
-    resp.add_val(33);
-    resp.add_val(71);
-    resp.add_val(32);
-    resp.add_val(91);
-    resp.add_val(10);
-    resp.add_val(5);
-    resp.add_val(1500);
-    resp.add_val(0);
+    let expeditions = sqlx::query!(
+        "SELECT target, alu_sec, location_1, location_2
+        FROM expedition
+        WHERE pid = $1",
+        session.player_id
+    )
+    .fetch_all(db)
+    .await?;
 
-    resp.add_val(124);
-    resp.add_val(44);
-    resp.add_val(91);
-    resp.add_val(71);
-    resp.add_val(16);
-    resp.add_val(5);
-    resp.add_val(6000);
-    resp.add_val(0);
+    resp.add_key("expeditions");
+
+    for exp in expeditions {
+        resp.add_val(exp.target); // typ
+        resp.add_val(71); // ??
+        resp.add_val(32); // ??
+        resp.add_val(91); // ??
+        resp.add_val(exp.location_1); // location 1
+        resp.add_val(exp.location_2); // location 2
+        resp.add_val(exp.alu_sec); // alu
+        resp.add_val(0); // 1 => egg, 2 => inc. daily task
+    }
 
     resp.add_key("expeditionevent");
     resp.add_val(in_seconds(-60 * 60));
@@ -898,7 +907,7 @@ pub(crate) async fn poll(
     resp.add_val(0);
     resp.add_val(0);
     resp.add_val(0);
-    resp.add_str("0");
+    resp.add_str("a");
     resp.add_val(0);
 
     resp.add_key("mailinvoice");
