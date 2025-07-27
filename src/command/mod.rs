@@ -60,6 +60,7 @@ pub(crate) async fn handle_command<'a>(
     }
 
     match name {
+        "PlayerTwitchAuthtoken" => Ok(ServerResponse::Success),
         "AccountCheck" => account_check(db, args).await,
         "AccountCreate" => account_create(session, db, args).await,
         "AccountDelete" => account_delete(session, db, args).await,

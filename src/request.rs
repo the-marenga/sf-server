@@ -205,7 +205,7 @@ impl Session {
             || [
                 "AccountCreate", "AccountLogin", "AccountCheck",
                 "AccountDelete", "PlayerHelpshiftAuthtoken",
-                "getserverversion", "PlayerWhisper",
+                "getserverversion", "PlayerWhisper", "PlayerTwitchAuthtoken"
             ]
             .contains(&command)
     }
