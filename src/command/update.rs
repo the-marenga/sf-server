@@ -898,8 +898,43 @@ pub(crate) async fn poll(
     }
 
     let dungeon_progress_shadow = [
-        10, 10, 10, 10, 10, 10, 10, 10, 10, 4, -1, -1, -1, -1, 316, -1, -1, 0,
-        0, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, -1, -1, -1, -1, -1,
+        10,  // DesecratedCatacombs = 0,
+        10,  // MinesOfGloria = 1,
+        10,  // RuinsOfGnark = 2,
+        10,  // CutthroatGrotto = 3,
+        10,  // EmeraldScaleAltar = 4,
+        10,  // ToxicTree = 5,
+        10,  // MagmaStream = 6,
+        10,  // FrostBloodTemple = 7,
+        10,  // PyramidsOfMadness = 8,
+        4,   // BlackSkullFortress = 9,
+        1,  // CircusOfHorror = 10,
+        1,  // Hell = 11,
+        1,  // The13thFloor = 12,
+        1,  // Easteros = 13,
+        316, // Twister = 14,
+        1,  // TimeHonoredSchoolOfMagic = 15,
+        1,  // Hemorridor = 16,
+        0,   // ContinuousLoopofIdols = 17,
+        0,   // NordicGods = 18,
+        0,   // MountOlympus = 19,
+        1,  // TavernOfTheDarkDoppelgangers = 20,
+        1,  // DragonsHoard = 21,
+        1,  // HouseOfHorrors = 22,
+        1,  // ThirdLeagueofSuperheroes = 23,
+        1,  // DojoOfChildhoodHeroes = 24,
+        1,  // MonsterGrotto = 25,
+        1,  // CityOfIntrigues = 26,
+        1,  // SchoolOfMagicExpress = 27,
+        1,  // AshMountain = 28,
+        1,  // PlayaGamesHQ = 29,
+        0,   // ?
+        0,   // ?
+        1,  // Old Pixel = 32
+        2,  // Server Room = 33
+        3,  // Workshop = 34
+        4,  // Retro TV = 35
+        5,  // Meeting room = 36
     ];
 
     resp.add_key(&format!(
@@ -910,72 +945,8 @@ pub(crate) async fn poll(
         resp.add_val(val);
     }
 
-    #[derive(Debug, Clone, Copy)]
-    struct DungeonInfo {
-        monster_name: u16,
-        loot: u8,
-        level: u16,
-        class: u8,
-        element: u8,
-    }
-
-    fn lookup_light_dungeon(dungeon_id: usize) -> Vec<DungeonInfo> {
-        let limit = match dungeon_id {
-            14 => 100,  // Tower
-            17 => 40,   // Portal
-            31 => 1000, // Sandstorm
-            _ => 10,
-        };
-
-        (0..limit)
-            .map(|_floor| DungeonInfo {
-                monster_name: 1150,
-                loot: 0,
-                level: dungeon_id as u16,
-                class: 1,
-                element: 0,
-            })
-            .collect()
-    }
-
-    let mut dungeon_enemies = vec![];
-    let mut current_dungeon_enemies = vec![];
-
-    for (dungeon_id, progress) in
-        dungeon_progress_light.iter().copied().enumerate()
-    {
-        if progress < 0 {
-            continue;
-        }
-        let progress = progress as usize;
-        let dungeon = lookup_light_dungeon(dungeon_id);
-        let Some(current) = dungeon.get(progress).copied() else {
-            continue;
-        };
-        current_dungeon_enemies.push((dungeon_id, current));
-
-        if let Some(pre2) = progress
-            .checked_sub(2)
-            .and_then(|a| dungeon.get(a))
-            .copied()
-        {
-            dungeon_enemies.push((dungeon_id, pre2));
-        };
-        if let Some(pre) = progress
-            .checked_sub(1)
-            .and_then(|a| dungeon.get(a))
-            .copied()
-        {
-            dungeon_enemies.push((dungeon_id, pre));
-        };
-        dungeon_enemies.push((dungeon_id, current));
-        if let Some(post1) = dungeon.get(progress + 1).copied() {
-            dungeon_enemies.push((dungeon_id, post1));
-        };
-        if let Some(post2) = dungeon.get(progress + 2).copied() {
-            dungeon_enemies.push((dungeon_id, post2));
-        };
-    }
+    let (dungeon_enemies, current_dungeon_enemies) =
+        calc_dungeon_progress(&dungeon_progress_light, false);
 
     resp.add_key(&format!("dungeonenemieslight({})", dungeon_enemies.len()));
     for enemy in dungeon_enemies {
@@ -996,42 +967,27 @@ pub(crate) async fn poll(
         resp.add_val(enemy.1.element);
     }
 
-    resp.add_key("dungeonenemiesshadow(19)");
-    resp.add_str(
-        "43/10/2/21/10/2/61/10/2/163/10/2/139/10/2/445/15/0/451/15/0/452/15/0/\
-         427/15/0/421/15/0/1320/18/2/1321/18/2/1322/18/2/1400/19/2/1401/19/2/\
-         1402/19/2/1410/20/2/1411/20/2/1412/20/2/",
-    );
-    // 43/10/2/
-    // 21/10/2/
-    // 61/10/2/
-    // 163/10/2/
-    // 139/10/2/
-    // 445/15/0/
-    // 451/15/0/
-    // 452/15/0/
-    // 427/15/0/
-    // 421/15/0/
-    // 1320/18/2/
-    // 1321/18/2/
-    // 1322/18/2/
-    // 1400/19/2/
-    // 1401/19/2/
-    // 1402/19/2/
-    // 1410/20/2/
-    // 1411/20/2/
-    // 1412/20/2/
+    let (dungeon_enemies, current_dungeon_enemies) =
+        calc_dungeon_progress(&dungeon_progress_shadow, true);
 
-    resp.add_key("currentdungeonenemiesshadow(5)");
-    resp.add_str(
-        "61/10/360/3/0/452/15/343/1/0/1320/18/222/1/0/1400/19/345/1/2/1410/20/\
-         345/2/2/",
-    );
-    // 61/10/360/3/0
-    // 452/15/343/1/0
-    // 1320/18/222/1/0
-    // 1400/19/345/1/2
-    // 1410/20/345/2/2
+    resp.add_key(&format!("dungeonenemiesshadow({})", dungeon_enemies.len()));
+    for enemy in dungeon_enemies {
+        resp.add_val(enemy.1.monster_name);
+        resp.add_val(enemy.0 + 1);
+        resp.add_val(enemy.1.loot);
+    }
+
+    resp.add_key(&format!(
+        "currentdungeonenemiesshadow({})",
+        current_dungeon_enemies.len()
+    ));
+    for enemy in current_dungeon_enemies {
+        resp.add_val(enemy.1.monster_name);
+        resp.add_val(enemy.0 + 1);
+        resp.add_val(enemy.1.level);
+        resp.add_val(enemy.1.class);
+        resp.add_val(enemy.1.element);
+    }
 
     resp.add_key("portalprogress(3)");
     resp.add_val("27/100/194");
@@ -1091,6 +1047,77 @@ pub(crate) async fn poll(
     // }
 
     resp.build()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DungeonInfo {
+    monster_name: u16,
+    loot: u8,
+    level: u16,
+    class: u8,
+    element: u8,
+}
+
+fn lookup_dungeon(dungeon_id: usize, is_shadow: bool) -> Vec<DungeonInfo> {
+    let limit = match dungeon_id {
+        14 if !is_shadow => 100,  // Tower
+        17 if !is_shadow => 40,   // Portal
+        31 if !is_shadow => 1000, // Sandstorm
+        _ => 10,
+    };
+
+    (0..limit)
+        .map(|_floor| DungeonInfo {
+            monster_name: 1150,
+            loot: 0,
+            level: dungeon_id as u16,
+            class: 1,
+            element: 0,
+        })
+        .collect()
+}
+
+fn calc_dungeon_progress(
+    dungeon_progress: &[i32],
+    is_shadow: bool,
+) -> (Vec<(usize, DungeonInfo)>, Vec<(usize, DungeonInfo)>) {
+    let mut dungeon_enemies = vec![];
+    let mut current_dungeon_enemies = vec![];
+
+    for (dungeon_id, progress) in dungeon_progress.iter().copied().enumerate() {
+        if progress < 0 {
+            continue;
+        }
+        let progress = progress as usize;
+        let dungeon = lookup_dungeon(dungeon_id, is_shadow);
+        let Some(current) = dungeon.get(progress).copied() else {
+            continue;
+        };
+        current_dungeon_enemies.push((dungeon_id, current));
+
+        if let Some(pre2) = progress
+            .checked_sub(2)
+            .and_then(|a| dungeon.get(a))
+            .copied()
+        {
+            dungeon_enemies.push((dungeon_id, pre2));
+        };
+        if let Some(pre) = progress
+            .checked_sub(1)
+            .and_then(|a| dungeon.get(a))
+            .copied()
+        {
+            dungeon_enemies.push((dungeon_id, pre));
+        };
+        dungeon_enemies.push((dungeon_id, current));
+        if let Some(post1) = dungeon.get(progress + 1).copied() {
+            dungeon_enemies.push((dungeon_id, post1));
+        };
+        if let Some(post2) = dungeon.get(progress + 2).copied() {
+            dungeon_enemies.push((dungeon_id, post2));
+        };
+    }
+    (dungeon_enemies, current_dungeon_enemies)
 }
 
 fn add_reward_previews(resp: &mut ResponseBuilder) {
