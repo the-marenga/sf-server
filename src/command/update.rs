@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use sf_api::{
-    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
+    command::AttributeType, gamestate::{dungeons::LightDungeon, items::EquipmentSlot}, misc::to_sf_string,
 };
 use sqlx::Sqlite;
 use strum::IntoEnumIterator;
@@ -841,6 +843,37 @@ pub(crate) async fn poll(
 
     resp.add_key("unlockfeature");
 
+    // DesecratedCatacombs = 0,
+    // MinesOfGloria = 1,
+    // RuinsOfGnark = 2,
+    // CutthroatGrotto = 3,
+    // EmeraldScaleAltar = 4,
+    // ToxicTree = 5,
+    // MagmaStream = 6,
+    // FrostBloodTemple = 7,
+    // PyramidsofMadness = 8,
+    // BlackSkullFortress = 9,
+    // CircusOfHorror = 10,
+    // Hell = 11,
+    // The13thFloor = 12,
+    // Easteros = 13,
+    // Tower = 14,
+    // TimeHonoredSchoolofMagic = 15,
+    // Hemorridor = 16,
+    // NordicGods = 18,
+    // MountOlympus = 19,
+    // TavernoftheDarkDoppelgangers = 20,
+    // DragonsHoard = 21,
+    // HouseOfHorrors = 22,
+    // ThirdLeagueOfSuperheroes = 23,
+    // DojoOfChildhoodHeroes = 24,
+    // MonsterGrotto = 25,
+    // CityOfIntrigues = 26,
+    // SchoolOfMagicExpress = 27,
+    // AshMountain = 28,
+    // PlayaGamesHQ = 29,
+    // TrainingCamp = 30,
+    // Sandstorm = 31,
     let dungeon_progress_light = [
         10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 6, 86, 1, 2, 27, 1,
         1, 0, 3, 0, 0, -1, -1, -1, -1, -1, 0, 10, -1, -1, -1, -1, -1, -1,
@@ -866,50 +899,93 @@ pub(crate) async fn poll(
         resp.add_val(val);
     }
 
-    struct DungeonEnemy {
-        id: i32,
-        id2: i32,
+    #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+    struct DungeonId {
+        monster_name: i32,
+        dungeon_id: i32,
+    }
+
+    struct DungeonInfo {
         status: i32,
-        stats: Option<DungeonEnemyStats>
+        stats: Option<DungeonEnemy>,
     }
 
-    struct DungeonEnemyStats {
-        uk1: i32,
-        uk2: i32,
-        uk3: i32,
+    struct DungeonEnemy {
+        level: i32,
+        class: i32,
+        element: i32,
     }
 
-    let dungeon_enemies_light = [
-        "604/14/2", "605/14/2", "606/14/2", "607/14/2", "608/14/2", "484/15/2",
-        "485/15/2", "486/15/2", "487/15/2", "488/15/2", "1100/16/0",
-        "1101/16/0", "1102/16/0", "1103/16/0", "1200/17/0", "1201/17/0",
-        "1202/17/0", "1203/17/0", "1204/17/2", "575/18/0", "576/18/0",
-        "577/18/0", "578/18/0", "579/18/0", "1400/19/0", "1401/19/0",
-        "1402/19/0", "1403/19/0", "1410/20/0", "1411/20/0", "1412/20/0",
-        "1413/20/0", "1120/21/0", "1121/21/0", "1122/21/0", "1131/22/0",
-        "1132/22/0", "1133/22/0", "1134/22/2", "1135/22/0", "1140/23/0",
-        "1141/23/0", "1142/23/0", "1150/24/0", "1151/24/0", "1152/24/0",
-        "253/30/2", "254/30/2", "255/30/2",
-    ];
+    #[rustfmt::skip]
+    let enemies = [
+     (DungeonId { monster_name: 604, dungeon_id: 14 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 605, dungeon_id: 14 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 606, dungeon_id: 14 },  DungeonInfo { status: 2, stats: Some(DungeonEnemy { level: 111, class: 3, element: 0 }) }), // Easteros
+     (DungeonId { monster_name: 607, dungeon_id: 14 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 608, dungeon_id: 14 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 484, dungeon_id: 15 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 485, dungeon_id: 15 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 486, dungeon_id: 15 },  DungeonInfo { status: 2, stats: Some(DungeonEnemy { level: 372, class: 1, element: 0 }) }),
+     (DungeonId { monster_name: 487, dungeon_id: 15 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 488, dungeon_id: 15 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 1100, dungeon_id: 16 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1101, dungeon_id: 16 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 257, class: 1, element: 0 }) }),
+     (DungeonId { monster_name: 1102, dungeon_id: 16 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1103, dungeon_id: 16 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1200, dungeon_id: 17 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1201, dungeon_id: 17 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1202, dungeon_id: 17 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 228, class: 2, element: 0 }) }),
+     (DungeonId { monster_name: 1203, dungeon_id: 17 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1204, dungeon_id: 17 }, DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 575, dungeon_id: 18 },  DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 576, dungeon_id: 18 },  DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 577, dungeon_id: 18 },  DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 362, class: 1, element: 0 }) }),
+     (DungeonId { monster_name: 578, dungeon_id: 18 },  DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 579, dungeon_id: 18 },  DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1400, dungeon_id: 19 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1401, dungeon_id: 19 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 240, class: 1, element: 3 }) }),
+     (DungeonId { monster_name: 1402, dungeon_id: 19 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1403, dungeon_id: 19 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1410, dungeon_id: 20 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1411, dungeon_id: 20 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 240, class: 1, element: 3 }) }),
+     (DungeonId { monster_name: 1412, dungeon_id: 20 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1413, dungeon_id: 20 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1120, dungeon_id: 21 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 410, class: 2, element: 0 }) }),
+     (DungeonId { monster_name: 1121, dungeon_id: 21 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1122, dungeon_id: 21 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1131, dungeon_id: 22 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1132, dungeon_id: 22 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1133, dungeon_id: 22 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 219, class: 3, element: 2 }) }),
+     (DungeonId { monster_name: 1134, dungeon_id: 22 }, DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 1135, dungeon_id: 22 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1140, dungeon_id: 23 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 240, class: 2, element: 2 }) }),
+     (DungeonId { monster_name: 1141, dungeon_id: 23 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1142, dungeon_id: 23 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1150, dungeon_id: 24 }, DungeonInfo { status: 0, stats: Some(DungeonEnemy { level: 280, class: 2, element: 3 }) }),
+     (DungeonId { monster_name: 1151, dungeon_id: 24 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 1152, dungeon_id: 24 }, DungeonInfo { status: 0, stats: None }),
+     (DungeonId { monster_name: 253, dungeon_id: 30 },  DungeonInfo { status: 2, stats: Some(DungeonEnemy { level: 666, class: 3, element: 0 }) }), // PlayaHq
+     (DungeonId { monster_name: 254, dungeon_id: 30 },  DungeonInfo { status: 2, stats: None }),
+     (DungeonId { monster_name: 255, dungeon_id: 30 },  DungeonInfo { status: 2, stats: None })
+     ];
 
-    resp.add_key(&format!(
-        "dungeonenemieslight({})",
-        dungeon_enemies_light.len()
-    ));
-    for enemy in dungeon_enemies_light {
-        resp.add_str(enemy);
+    resp.add_key(&format!("dungeonenemieslight({})", enemies.len()));
+    for enemy in &enemies {
+        resp.add_val(enemy.0.monster_name);
+        resp.add_val(enemy.0.dungeon_id);
+        resp.add_val(enemy.1.status);
     }
-
-    let currentdungeonenemieslight = [
-        "606/14/370/3/0", "486/15/372/1/0", "1101/16/257/1/0",
-        "1202/17/228/2/0", "577/18/362/1/0", "1401/19/240/1/3",
-        "1411/20/240/1/3", "1120/21/410/2/0", "1133/22/219/3/2",
-        "1140/23/240/2/2", "1150/24/280/2/3", "253/30/410/3/0",
-    ];
 
     resp.add_key("currentdungeonenemieslight(12)");
-    for enemy in currentdungeonenemieslight {
-        resp.add_str(enemy);
+    for enemy in &enemies {
+        let Some(stats) = &enemy.1.stats else {
+            continue;
+        };
+        resp.add_val(enemy.0.monster_name);
+        resp.add_val(enemy.0.dungeon_id);
+        resp.add_val(stats.level);
+        resp.add_val(stats.class);
+        resp.add_val(stats.element);
     }
 
     resp.add_key("dungeonenemiesshadow(19)");
