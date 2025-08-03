@@ -4,7 +4,7 @@ use enum_map::EnumMap;
 use sf_api::{
     command::AttributeType,
     gamestate::{
-        dungeons::{DungeonProgress, LightDungeon},
+        dungeons::{Dungeon, DungeonProgress, LightDungeon},
         items::EquipmentSlot,
     },
     misc::to_sf_string,
@@ -908,33 +908,33 @@ pub(crate) async fn poll(
         10,  // FrostBloodTemple = 7,
         10,  // PyramidsOfMadness = 8,
         4,   // BlackSkullFortress = 9,
-        1,  // CircusOfHorror = 10,
-        1,  // Hell = 11,
-        1,  // The13thFloor = 12,
-        1,  // Easteros = 13,
+        1,   // CircusOfHorror = 10,
+        1,   // Hell = 11,
+        1,   // The13thFloor = 12,
+        1,   // Easteros = 13,
         316, // Twister = 14,
-        1,  // TimeHonoredSchoolOfMagic = 15,
-        1,  // Hemorridor = 16,
+        1,   // TimeHonoredSchoolOfMagic = 15,
+        1,   // Hemorridor = 16,
         0,   // ContinuousLoopofIdols = 17,
         0,   // NordicGods = 18,
         0,   // MountOlympus = 19,
-        1,  // TavernOfTheDarkDoppelgangers = 20,
-        1,  // DragonsHoard = 21,
-        1,  // HouseOfHorrors = 22,
-        1,  // ThirdLeagueofSuperheroes = 23,
-        1,  // DojoOfChildhoodHeroes = 24,
-        1,  // MonsterGrotto = 25,
-        1,  // CityOfIntrigues = 26,
-        1,  // SchoolOfMagicExpress = 27,
-        1,  // AshMountain = 28,
-        1,  // PlayaGamesHQ = 29,
+        1,   // TavernOfTheDarkDoppelgangers = 20,
+        1,   // DragonsHoard = 21,
+        1,   // HouseOfHorrors = 22,
+        1,   // ThirdLeagueofSuperheroes = 23,
+        1,   // DojoOfChildhoodHeroes = 24,
+        1,   // MonsterGrotto = 25,
+        1,   // CityOfIntrigues = 26,
+        1,   // SchoolOfMagicExpress = 27,
+        1,   // AshMountain = 28,
+        1,   // PlayaGamesHQ = 29,
         0,   // ?
         0,   // ?
-        1,  // Old Pixel = 32
-        2,  // Server Room = 33
-        3,  // Workshop = 34
-        4,  // Retro TV = 35
-        5,  // Meeting room = 36
+        1,   // Old Pixel = 32
+        2,   // Server Room = 33
+        3,   // Workshop = 34
+        4,   // Retro TV = 35
+        5,   // Meeting room = 36
     ];
 
     resp.add_key(&format!(
@@ -945,48 +945,46 @@ pub(crate) async fn poll(
         resp.add_val(val);
     }
 
-    let (dungeon_enemies, current_dungeon_enemies) =
-        calc_dungeon_progress(&dungeon_progress_light, false);
+    let dungeon_info = calc_dungeon_progress(&dungeon_progress_light, false);
 
-    resp.add_key(&format!("dungeonenemieslight({})", dungeon_enemies.len()));
-    for enemy in dungeon_enemies {
-        resp.add_val(enemy.1.monster_name);
-        resp.add_val(enemy.0 + 1);
-        resp.add_val(enemy.1.loot);
+    resp.add_key(&format!("dungeonenemieslight({})", dungeon_info.len()));
+    for dungeon in &dungeon_info {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.loot);
     }
 
     resp.add_key(&format!(
         "currentdungeonenemieslight({})",
-        current_dungeon_enemies.len()
+        dungeon_info.iter().filter(|a| a.is_current).count()
     ));
-    for enemy in &current_dungeon_enemies {
-        resp.add_val(enemy.1.monster_name);
-        resp.add_val(enemy.0 + 1);
-        resp.add_val(enemy.1.level);
-        resp.add_val(enemy.1.class);
-        resp.add_val(enemy.1.element);
+    for dungeon in dungeon_info.iter().filter(|a| a.is_current) {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.level);
+        resp.add_val(dungeon.enemy.class);
+        resp.add_val(dungeon.enemy.element);
     }
 
-    let (dungeon_enemies, current_dungeon_enemies) =
-        calc_dungeon_progress(&dungeon_progress_shadow, true);
+    let dungeon_info = calc_dungeon_progress(&dungeon_progress_shadow, true);
 
-    resp.add_key(&format!("dungeonenemiesshadow({})", dungeon_enemies.len()));
-    for enemy in dungeon_enemies {
-        resp.add_val(enemy.1.monster_name);
-        resp.add_val(enemy.0 + 1);
-        resp.add_val(enemy.1.loot);
+    resp.add_key(&format!("dungeonenemiesshadow({})", dungeon_info.len()));
+    for dungeon in &dungeon_info {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.loot);
     }
 
     resp.add_key(&format!(
         "currentdungeonenemiesshadow({})",
-        current_dungeon_enemies.len()
+        dungeon_info.iter().filter(|a| a.is_current).count()
     ));
-    for enemy in current_dungeon_enemies {
-        resp.add_val(enemy.1.monster_name);
-        resp.add_val(enemy.0 + 1);
-        resp.add_val(enemy.1.level);
-        resp.add_val(enemy.1.class);
-        resp.add_val(enemy.1.element);
+    for dungeon in dungeon_info.iter().filter(|a| a.is_current) {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.level);
+        resp.add_val(dungeon.enemy.class);
+        resp.add_val(dungeon.enemy.element);
     }
 
     resp.add_key("portalprogress(3)");
@@ -1050,7 +1048,7 @@ pub(crate) async fn poll(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct DungeonInfo {
+struct DungeonEnemy {
     monster_name: u16,
     loot: u8,
     level: u16,
@@ -1058,7 +1056,7 @@ struct DungeonInfo {
     element: u8,
 }
 
-fn lookup_dungeon(dungeon_id: usize, is_shadow: bool) -> Vec<DungeonInfo> {
+fn lookup_dungeon(dungeon_id: usize, is_shadow: bool) -> Vec<DungeonEnemy> {
     let limit = match dungeon_id {
         14 if !is_shadow => 100,  // Tower
         17 if !is_shadow => 40,   // Portal
@@ -1067,7 +1065,7 @@ fn lookup_dungeon(dungeon_id: usize, is_shadow: bool) -> Vec<DungeonInfo> {
     };
 
     (0..limit)
-        .map(|_floor| DungeonInfo {
+        .map(|_floor| DungeonEnemy {
             monster_name: 1150,
             loot: 0,
             level: dungeon_id as u16,
@@ -1077,47 +1075,40 @@ fn lookup_dungeon(dungeon_id: usize, is_shadow: bool) -> Vec<DungeonInfo> {
         .collect()
 }
 
+struct DungeonInfo {
+    id: usize,
+    enemy: DungeonEnemy,
+    is_current: bool,
+}
+
 fn calc_dungeon_progress(
     dungeon_progress: &[i32],
     is_shadow: bool,
-) -> (Vec<(usize, DungeonInfo)>, Vec<(usize, DungeonInfo)>) {
-    let mut dungeon_enemies = vec![];
-    let mut current_dungeon_enemies = vec![];
+) -> Vec<DungeonInfo> {
+    let mut dungeon_enemies = Vec::new();
 
-    for (dungeon_id, progress) in dungeon_progress.iter().copied().enumerate() {
-        if progress < 0 {
+    for (idx, &progress) in dungeon_progress.iter().enumerate() {
+        let dungeon = lookup_dungeon(idx, is_shadow);
+        if progress >= dungeon.len() as i32 || progress < 0 {
             continue;
         }
-        let progress = progress as usize;
-        let dungeon = lookup_dungeon(dungeon_id, is_shadow);
-        let Some(current) = dungeon.get(progress).copied() else {
-            continue;
-        };
-        current_dungeon_enemies.push((dungeon_id, current));
 
-        if let Some(pre2) = progress
-            .checked_sub(2)
-            .and_then(|a| dungeon.get(a))
-            .copied()
-        {
-            dungeon_enemies.push((dungeon_id, pre2));
-        };
-        if let Some(pre) = progress
-            .checked_sub(1)
-            .and_then(|a| dungeon.get(a))
-            .copied()
-        {
-            dungeon_enemies.push((dungeon_id, pre));
-        };
-        dungeon_enemies.push((dungeon_id, current));
-        if let Some(post1) = dungeon.get(progress + 1).copied() {
-            dungeon_enemies.push((dungeon_id, post1));
-        };
-        if let Some(post2) = dungeon.get(progress + 2).copied() {
-            dungeon_enemies.push((dungeon_id, post2));
-        };
+        for offset in &[-2, -1, 0, 1, 2] {
+            let pos = progress + offset;
+            if pos < 0 {
+                continue;
+            }
+            if let Some(enemy) = dungeon.get(pos as usize).copied() {
+                dungeon_enemies.push(DungeonInfo {
+                    id: idx + 1,
+                    enemy,
+                    is_current: *offset == 0,
+                });
+            }
+        }
     }
-    (dungeon_enemies, current_dungeon_enemies)
+
+    dungeon_enemies
 }
 
 fn add_reward_previews(resp: &mut ResponseBuilder) {
