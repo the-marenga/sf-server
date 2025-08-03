@@ -9,6 +9,7 @@ axum = "0.7.9"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
 base64 = "0.22.1"
 clap = { version = "4.5.41", features = ["derive"] }
+enum-map = "2.7.3"
 fastrand = "2.3.0"
 log = "0.4.27"
 num-derive = "0.4.2"

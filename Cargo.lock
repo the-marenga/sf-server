@@ -2187,6 +2187,7 @@ dependencies = [
  "axum-server",
  "base64",
  "clap",
+ "enum-map",
  "fastrand",
  "log",
  "num-derive",
