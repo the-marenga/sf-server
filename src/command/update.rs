@@ -1,13 +1,5 @@
-use std::collections::HashMap;
-
-use enum_map::EnumMap;
 use sf_api::{
-    command::AttributeType,
-    gamestate::{
-        dungeons::{Dungeon, DungeonProgress, LightDungeon},
-        items::EquipmentSlot,
-    },
-    misc::to_sf_string,
+    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
 };
 use sqlx::Sqlite;
 use strum::IntoEnumIterator;
