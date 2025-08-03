@@ -7,7 +7,7 @@ use player::*;
 use sqlx::Sqlite;
 use update::poll;
 
-use crate::{request::Session, response::*, SERVER_VERSION};
+use crate::{SERVER_VERSION, request::Session, response::*};
 
 mod account;
 mod debug;
@@ -60,7 +60,7 @@ pub(crate) async fn handle_command<'a>(
     }
 
     match name {
-        "PlayerTwitchAuthtoken" => Ok(ServerResponse::Success),
+        "PlayerTwitchAuthtoken" => Ok(ServerResponse::Success), // TODO:
         "AccountCheck" => account_check(db, args).await,
         "AccountCreate" => account_create(session, db, args).await,
         "AccountDelete" => account_delete(session, db, args).await,
@@ -85,6 +85,7 @@ pub(crate) async fn handle_command<'a>(
         "Poll" => poll(session, "poll", db, Default::default()).await,
         "UserSettingsUpdate" => Ok(ServerResponse::Success), // TODO:
         "getserverversion" => get_server_version(session, db).await,
+        "ExpeditionStart" => player_start_expedition(session, db, args).await,
         _ => {
             error!("Unknown command: {name} - {args:?}");
             Err(ServerError::UnknownRequest(name.into()))

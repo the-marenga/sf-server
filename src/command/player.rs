@@ -10,9 +10,9 @@ use sf_api::{
 use sqlx::Sqlite;
 
 use super::{
-    debug::{handle_cheat_command, CheatCmd},
-    effective_mount, in_seconds, now, poll, xp_for_next_level,
     CommandArguments, Portrait, ResponseBuilder, ServerError, ServerResponse,
+    debug::{CheatCmd, handle_cheat_command},
+    effective_mount, in_seconds, now, poll, xp_for_next_level,
 };
 use crate::request::Session;
 
@@ -365,6 +365,40 @@ pub(crate) async fn player_finish_quest(
     tx.commit().await?;
 
     poll(session, "", db, resp).await
+}
+
+pub(crate) async fn player_start_expedition(
+    session: Session,
+    db: &sqlx::Pool<Sqlite>,
+    args: CommandArguments<'_>,
+) -> Result<ServerResponse, ServerError> {
+    let mut tx = db.begin().await?;
+
+    let existing = sqlx::query!(
+        "SELECT pid FROM ActiveExpedition WHERE pid = $1", session.player_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if existing.is_some() {
+        return Err(ServerError::StillBusy);
+    }
+
+    let expedition = args.get_int(0, "expedition")?;
+
+    let exp_data = sqlx::query!(
+        "SELECT target, alu_sec, location_1, location_2
+         FROM Expedition WHERE pid = $1 ORDER BY id",
+        session.player_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    // INIT an expedition from the data
+
+
+
+    todo!()
 }
 
 pub(crate) async fn player_start_quest(
@@ -894,7 +928,7 @@ pub(crate) async fn player_arena_fight(
     resp.add_val(0);
     resp.add_val(2); // rank pre
     resp.add_val(2); // rank post
-                     // Item
+    // Item
     for _ in 0..12 {
         resp.add_val(0);
     }
