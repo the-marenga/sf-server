@@ -1,10 +1,5 @@
 use sf_api::{
-    command::AttributeType,
-    gamestate::{
-        items::EquipmentSlot,
-        tavern::{ExpeditionThing, Location},
-    },
-    misc::to_sf_string,
+    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
 };
 use sqlx::Sqlite;
 use strum::IntoEnumIterator;

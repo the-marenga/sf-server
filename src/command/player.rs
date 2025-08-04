@@ -396,8 +396,6 @@ pub(crate) async fn player_start_expedition(
 
     // INIT an expedition from the data
 
-
-
     todo!()
 }
 
