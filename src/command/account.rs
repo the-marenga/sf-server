@@ -1,10 +1,10 @@
-use command::{poll, CommandArguments, Portrait};
+use command::{CommandArguments, Portrait, poll};
 use fastrand::Rng;
 use num_traits::FromPrimitive;
 use request::Session;
 use sf_api::{
     gamestate::character::{Class, Gender, Race},
-    misc::{sha1_hash, HASH_CONST},
+    misc::{HASH_CONST, sha1_hash},
 };
 use sqlx::Sqlite;
 
@@ -63,7 +63,7 @@ pub(crate) async fn account_create(
     }
 
     // TODO: Do some more input validation
-    let hashed_password = sha1_hash(&format!("{password}{}", HASH_CONST));
+    let hashed_password = sha1_hash(&format!("{password}{HASH_CONST}"));
 
     let mut crypto_id = "0-".to_string();
     for _ in 2..DEFAULT_CRYPTO_ID.len() {
@@ -235,7 +235,7 @@ pub(crate) async fn account_delete(
 
     let id = char.pid;
     let pwhash = char.pw_hash;
-    let correct_full_hash = sha1_hash(&format!("{}{login_count}", pwhash));
+    let correct_full_hash = sha1_hash(&format!("{pwhash}{login_count}"));
     if correct_full_hash != full_hash {
         return Err(ServerError::WrongPassword);
     }
@@ -273,7 +273,7 @@ pub(crate) async fn account_login(
     let pid = info.pid;
     let pwhash = info.pw_hash;
 
-    let correct_full_hash = sha1_hash(&format!("{}{login_count}", pwhash));
+    let correct_full_hash = sha1_hash(&format!("{pwhash}{login_count}"));
     if correct_full_hash != full_hash {
         Err(ServerError::WrongPassword)?;
     }

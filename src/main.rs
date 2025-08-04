@@ -8,7 +8,7 @@ use axum::{
 };
 use log::{debug, error, info, warn};
 use request::{handle_cmd, handle_req};
-use sqlx::{sqlite::SqlitePoolOptions, Sqlite};
+use sqlx::{Sqlite, sqlite::SqlitePoolOptions};
 
 use crate::response::*;
 
@@ -54,7 +54,7 @@ async fn main() {
         .unwrap();
 
         let addr = SocketAddr::from(([127, 0, 0, 1], HTTPS_PORT));
-        info!("listening on https://{}", addr);
+        info!("listening on https://{addr}");
         axum_server::bind_rustls(addr, config)
             .serve(app.into_make_service())
             .await
@@ -67,7 +67,6 @@ static PROVIDE_HTTPS: bool = true;
 static HTTP_PORT: u16 = 6767;
 static HTTPS_PORT: u16 = 6768;
 
-#[allow(dead_code)]
 async fn redirect_http_to_https() {
     fn make_https(host: String, uri: Uri) -> Result<Uri, axum::BoxError> {
         let mut parts = uri.into_parts();
@@ -118,7 +117,7 @@ pub async fn get_db() -> Result<sqlx::Pool<Sqlite>, ServerError> {
             .connect(env!("DATABASE_URL"))
             .await
             .map_err(|e| {
-                error!("Database connection error: {:?}", e);
+                error!("Database connection error: {e:?}");
                 e.into()
             })
     })
