@@ -8,7 +8,7 @@ async-once-cell = "0.5.4"
 axum = "0.7.9"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
 base64 = "0.22.1"
-clap = { version = "4.5.41", features = ["derive"] }
+clap = { version = "4.5.42", features = ["derive"] }
 fastrand = "2.3.0"
 log = "0.4.27"
 num-derive = "0.4.2"
@@ -27,7 +27,7 @@ sha1 = "0.10.6"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
 strum = { version = "0.26.3", features = ["derive"] }
 thiserror = "2.0.12"
-tokio = { version = "1.46.1", features = ["macros", "rt-multi-thread", "fs"] }
-tokio-util = "0.7.15"
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "fs"] }
+tokio-util = "0.7.16"
 tower-http = { version = "0.6.6", features = ["cors"] }
 tracing-subscriber = "0.3.19"

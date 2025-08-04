@@ -168,13 +168,12 @@ pub(crate) async fn poll(
     resp.skip_key();
 
     resp.add_key("tavernspecial");
-    resp.add_val(0);
-
+    resp.add_val(0); // 100 if event active
     resp.add_key("tavernspecialsub");
-    resp.add_val(0);
+    resp.add_val(0); // 1 << Event
 
     resp.add_key("tavernspecialend");
-    resp.add_val(-1);
+    resp.add_val(in_seconds(600));
 
     resp.add_key("attbonus1(3)");
     resp.add_str("0/0/0/0");
@@ -847,30 +846,146 @@ pub(crate) async fn poll(
 
     resp.add_key("unlockfeature");
 
-    resp.add_key("dungeonprogresslight(30)");
-    resp.add_str(
-        "-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/0/-1/-1/-1/-1/-1/\
-         -1/-1/-1/-1/-1/-1/-1/",
-    );
+    let dungeon_progress_light = [
+        0,  // DesecratedCatacombs = 0,
+        0,  // MinesOfGloria = 1,
+        0,  // RuinsOfGnark = 2,
+        0,  // CutthroatGrotto = 3,
+        0,  // EmeraldScaleAltar = 4,
+        0,  // ToxicTree = 5,
+        0,  // MagmaStream = 6,
+        0,  // FrostBloodTemple = 7,
+        0,  // PyramidsofMadness = 8,
+        0,  // BlackSkullFortress = 9,
+        0,  // CircusOfHorror = 10,
+        0,  // Hell = 11,
+        0,  // The13thFloor = 12,
+        6,  // Easteros = 13,
+        86, // Tower = 14,
+        1,  // TimeHonoredSchoolofMagic = 15,
+        2,  // Hemorridor = 16,
+        27, // Portal = 17
+        1,  // NordicGods = 18,
+        1,  // MountOlympus = 19,
+        0,  // TavernoftheDarkDoppelgangers = 20,
+        3,  // DragonsHoard = 21,
+        0,  // HouseOfHorrors = 22,
+        0,  // ThirdLeagueOfSuperheroes = 23,
+        1,  // DojoOfChildhoodHeroes = 24,
+        1,  // MonsterGrotto = 25,
+        1,  // CityOfIntrigues = 26,
+        1,  // SchoolOfMagicExpress = 27,
+        1,  // AshMountain = 28,
+        0,  // PlayaGamesHQ = 29,
+        10, // TrainingCamp = 30,
+        1,  // Sandstorm = 31,
+        1,  // Old Pixel = 32
+        2,  // Server Room = 33
+        3,  // Workshop = 34
+        4,  // Retro TV = 35
+        5,  // Meeting room = 36
+    ];
 
-    resp.add_key("dungeonprogressshadow(30)");
-    resp.add_str(
-        "-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/-1/\
-         -1/-1/-1/-1/-1/-1/-1/",
-    );
+    resp.add_key(&format!(
+        "dungeonprogresslight({})",
+        dungeon_progress_light.len()
+    ));
+    for val in dungeon_progress_light {
+        resp.add_val(val);
+    }
 
-    resp.add_key("dungeonenemieslight(6)");
-    resp.add_str("400/15/2/401/15/2/402/15/2/550/18/0/551/18/0/552/18/0/");
+    let dungeon_progress_shadow = [
+        10,  // DesecratedCatacombs = 0,
+        10,  // MinesOfGloria = 1,
+        10,  // RuinsOfGnark = 2,
+        10,  // CutthroatGrotto = 3,
+        10,  // EmeraldScaleAltar = 4,
+        10,  // ToxicTree = 5,
+        10,  // MagmaStream = 6,
+        10,  // FrostBloodTemple = 7,
+        10,  // PyramidsOfMadness = 8,
+        4,   // BlackSkullFortress = 9,
+        1,   // CircusOfHorror = 10,
+        1,   // Hell = 11,
+        1,   // The13thFloor = 12,
+        1,   // Easteros = 13,
+        316, // Twister = 14,
+        1,   // TimeHonoredSchoolOfMagic = 15,
+        1,   // Hemorridor = 16,
+        0,   // ContinuousLoopofIdols = 17,
+        0,   // NordicGods = 18,
+        0,   // MountOlympus = 19,
+        1,   // TavernOfTheDarkDoppelgangers = 20,
+        1,   // DragonsHoard = 21,
+        1,   // HouseOfHorrors = 22,
+        1,   // ThirdLeagueofSuperheroes = 23,
+        1,   // DojoOfChildhoodHeroes = 24,
+        1,   // MonsterGrotto = 25,
+        1,   // CityOfIntrigues = 26,
+        1,   // SchoolOfMagicExpress = 27,
+        1,   // AshMountain = 28,
+        1,   // PlayaGamesHQ = 29,
+        0,   // ?
+        0,   // ?
+        1,   // Old Pixel = 32
+        2,   // Server Room = 33
+        3,   // Workshop = 34
+        4,   // Retro TV = 35
+        5,   // Meeting room = 36
+    ];
 
-    resp.add_key("currentdungeonenemieslight(2)");
-    resp.add_key("400/15/200/1/0/550/18/200/1/0/");
+    resp.add_key(&format!(
+        "dungeonprogressshadow({})",
+        dungeon_progress_shadow.len()
+    ));
+    for val in dungeon_progress_shadow {
+        resp.add_val(val);
+    }
 
-    resp.add_key("dungeonenemiesshadow(0)");
+    let dungeon_info = calc_dungeon_progress(&dungeon_progress_light, false);
 
-    resp.add_key("currentdungeonenemiesshadow(0)");
+    resp.add_key(&format!("dungeonenemieslight({})", dungeon_info.len()));
+    for dungeon in &dungeon_info {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.loot);
+    }
+
+    resp.add_key(&format!(
+        "currentdungeonenemieslight({})",
+        dungeon_info.iter().filter(|a| a.is_current).count()
+    ));
+    for dungeon in dungeon_info.iter().filter(|a| a.is_current) {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.level);
+        resp.add_val(dungeon.enemy.class);
+        resp.add_val(dungeon.enemy.element);
+    }
+
+    let dungeon_info = calc_dungeon_progress(&dungeon_progress_shadow, true);
+
+    resp.add_key(&format!("dungeonenemiesshadow({})", dungeon_info.len()));
+    for dungeon in &dungeon_info {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.loot);
+    }
+
+    resp.add_key(&format!(
+        "currentdungeonenemiesshadow({})",
+        dungeon_info.iter().filter(|a| a.is_current).count()
+    ));
+    for dungeon in dungeon_info.iter().filter(|a| a.is_current) {
+        resp.add_val(dungeon.enemy.monster_name);
+        resp.add_val(dungeon.id);
+        resp.add_val(dungeon.enemy.level);
+        resp.add_val(dungeon.enemy.class);
+        resp.add_val(dungeon.enemy.element);
+    }
 
     resp.add_key("portalprogress(3)");
-    resp.add_val("0/0/0");
+    resp.add_val("27/100/194");
 
     resp.skip_key();
 
@@ -930,6 +1045,70 @@ pub(crate) async fn poll(
     // }
 
     resp.build()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DungeonEnemy {
+    monster_name: u16,
+    loot: u8,
+    level: u16,
+    class: u8,
+    element: u8,
+}
+
+fn lookup_dungeon(dungeon_id: usize, is_shadow: bool) -> Vec<DungeonEnemy> {
+    let limit = match dungeon_id {
+        14 if !is_shadow => 100,  // Tower
+        17 if !is_shadow => 40,   // Portal
+        31 if !is_shadow => 1000, // Sandstorm
+        _ => 10,
+    };
+
+    (0..limit)
+        .map(|_floor| DungeonEnemy {
+            monster_name: 1150,
+            loot: 0,
+            level: dungeon_id as u16,
+            class: 1,
+            element: 0,
+        })
+        .collect()
+}
+
+struct DungeonInfo {
+    id: usize,
+    enemy: DungeonEnemy,
+    is_current: bool,
+}
+
+fn calc_dungeon_progress(
+    dungeon_progress: &[i32],
+    is_shadow: bool,
+) -> Vec<DungeonInfo> {
+    let mut dungeon_enemies = Vec::new();
+
+    for (idx, &progress) in dungeon_progress.iter().enumerate() {
+        let dungeon = lookup_dungeon(idx, is_shadow);
+        if progress >= dungeon.len() as i32 || progress < 0 {
+            continue;
+        }
+
+        for offset in &[-2, -1, 0, 1, 2] {
+            let pos = progress + offset;
+            if pos < 0 {
+                continue;
+            }
+            if let Some(enemy) = dungeon.get(pos as usize).copied() {
+                dungeon_enemies.push(DungeonInfo {
+                    id: idx + 1,
+                    enemy,
+                    is_current: *offset == 0,
+                });
+            }
+        }
+    }
+
+    dungeon_enemies
 }
 
 fn add_reward_previews(resp: &mut ResponseBuilder) {

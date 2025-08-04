@@ -3,7 +3,7 @@ use std::fmt::Write;
 use sqlx::Sqlite;
 
 use super::CommandArguments;
-use crate::{request::Session, ResponseBuilder, ServerError, ServerResponse};
+use crate::{ResponseBuilder, ServerError, ServerResponse, request::Session};
 
 pub(crate) async fn group_get_hof(
     session: Session,

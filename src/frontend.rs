@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use axum::{extract::Request, response::*};
 use log::error;
 use once_cell::sync::OnceCell;
-use reqwest::{header::CONTENT_TYPE, Client, StatusCode};
+use reqwest::{Client, StatusCode, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 
 /// In order to provide the S&F interface without actually hosting and thus
