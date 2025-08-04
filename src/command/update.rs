@@ -5,10 +5,11 @@ use sqlx::Sqlite;
 use strum::IntoEnumIterator;
 
 use super::{
-    effective_mount, get_debug_value_default, in_seconds, item::add_debug_item,
-    now, xp_for_next_level, ResponseBuilder, ServerError, ServerResponse,
+    ResponseBuilder, ServerError, ServerResponse, effective_mount,
+    get_debug_value_default, in_seconds, item::add_debug_item, now,
+    xp_for_next_level,
 };
-use crate::{request::Session, SERVER_VERSION};
+use crate::{SERVER_VERSION, request::Session};
 
 pub(crate) async fn poll(
     session: Session,
@@ -162,13 +163,12 @@ pub(crate) async fn poll(
     resp.skip_key();
 
     resp.add_key("tavernspecial");
-    resp.add_val(0);
-
+    resp.add_val(0); // 100 if event active
     resp.add_key("tavernspecialsub");
-    resp.add_val(0);
+    resp.add_val(0); // 1 << Event
 
     resp.add_key("tavernspecialend");
-    resp.add_val(-1);
+    resp.add_val(in_seconds(600));
 
     resp.add_key("attbonus1(3)");
     resp.add_str("0/0/0/0");
@@ -453,15 +453,15 @@ pub(crate) async fn poll(
     resp.add_val(0); // 544
     resp.add_val(0); // 545
     resp.add_val(0); // 546
-                     // unit counts
+    // unit counts
     resp.add_val(0); // 547
     resp.add_val(0); // 548
     resp.add_val(0); // 549
-                     // upgrade_began
+    // upgrade_began
     resp.add_val(0); // 550
     resp.add_val(0); // 551
     resp.add_val(0); // 552
-                     // upgrade_finish
+    // upgrade_finish
     resp.add_val(0); // 553
     resp.add_val(0); // 554
     resp.add_val(0); // 555
@@ -477,11 +477,11 @@ pub(crate) async fn poll(
     resp.add_val(0); // 562
     resp.add_val(0); // 563
     resp.add_val(0); // 564
-                     // max_in_building
+    // max_in_building
     resp.add_val(0); // 565
     resp.add_val(0); // 566
     resp.add_val(0); // 567
-                     // max saved
+    // max saved
     resp.add_val(0); // 568
     resp.add_val(0); // 569
     resp.add_val(0); // 570
@@ -489,7 +489,7 @@ pub(crate) async fn poll(
     resp.add_val(0); // 571 building_upgraded
     resp.add_val(0); // 572 building_upgrade_finish
     resp.add_val(0); // 573 building_upgrade_began
-                     // per hour
+    // per hour
     resp.add_val(0); // 574
     resp.add_val(0); // 575
     resp.add_val(0); // 576
@@ -696,7 +696,7 @@ pub(crate) async fn poll(
     resp.add_val(0); // metal
     resp.add_val(0); // arcane
     resp.add_val(0); // souls
-                     // Fruits
+    // Fruits
     for _ in 0..5 {
         resp.add_val(0);
     }

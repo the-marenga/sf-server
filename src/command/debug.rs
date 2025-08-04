@@ -2,11 +2,11 @@ use clap::{Parser, Subcommand};
 use num_traits::FromPrimitive;
 use sf_api::{
     gamestate::character::Class,
-    misc::{sha1_hash, HASH_CONST},
+    misc::{HASH_CONST, sha1_hash},
 };
 use sqlx::Sqlite;
 
-use super::{update::poll, ServerError, ServerResponse};
+use super::{ServerError, ServerResponse, update::poll};
 use crate::{misc::OptionGet, request::Session};
 
 #[derive(Debug, Parser)]
@@ -71,7 +71,7 @@ pub(crate) async fn handle_cheat_command(
             .await?;
         }
         Command::SetPassword { new } => {
-            let hashed_password = sha1_hash(&format!("{new}{}", HASH_CONST));
+            let hashed_password = sha1_hash(&format!("{new}{HASH_CONST}"));
             let mut tx = db.begin().await?;
             sqlx::query!(
                 "UPDATE character as c

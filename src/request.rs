@@ -6,10 +6,10 @@ use log::error;
 use sf_api::misc::decrypt_server_request;
 
 use crate::{
-    command::{handle_command, CommandArguments},
+    DEFAULT_CRYPTO_ID, DEFAULT_CRYPTO_KEY, DEFAULT_SESSION_ID, ServerError,
+    command::{CommandArguments, handle_command},
     get_db,
     misc::OptionGet,
-    ServerError, DEFAULT_CRYPTO_ID, DEFAULT_CRYPTO_KEY, DEFAULT_SESSION_ID,
 };
 
 pub async fn handle_cmd(
@@ -22,11 +22,11 @@ pub async fn handle_cmd(
     let command_args = base64::engine::general_purpose::URL_SAFE
         .decode(command_args)
         .map_err(|e| {
-            error!("Error while decoding command_args: {:?}", e);
+            error!("Error while decoding command_args: {e:?}");
             ServerError::BadRequest
         })?;
     let command_args = String::from_utf8(command_args).map_err(|e| {
-        error!("Error while converting command_args to UTF-8: {:?}", e);
+        error!("Error while converting command_args to UTF-8: {e:?}");
         ServerError::BadRequest
     })?;
 
@@ -43,7 +43,7 @@ pub async fn handle_cmd(
             .fetch_one(&db)
             .await
             .map_err(|e| {
-                error!("Database error while fetching world_id: {:?}", e);
+                error!("Database error while fetching world_id: {e:?}");
                 ServerError::DBError(e)
             })?;
 
@@ -63,7 +63,7 @@ pub async fn handle_cmd(
             .fetch_optional(&db)
             .await
             .map_err(|e| {
-                error!("Database error while fetching session: {:?}", e);
+                error!("Database error while fetching session: {e:?}");
                 ServerError::DBError(e)
             })?;
 
@@ -119,7 +119,7 @@ pub async fn handle_req(
             .fetch_one(&db)
             .await
             .map_err(|e| {
-                error!("Database error while fetching world_id: {:?}", e);
+                error!("Database error while fetching world_id: {e:?}");
                 ServerError::DBError(e)
             })?;
 
@@ -139,7 +139,7 @@ pub async fn handle_req(
             .fetch_optional(&db)
             .await
             .map_err(|e| {
-                error!("Database error while fetching session: {:?}", e);
+                error!("Database error while fetching session: {e:?}");
                 ServerError::DBError(e)
             })?;
 

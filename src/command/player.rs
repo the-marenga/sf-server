@@ -10,9 +10,9 @@ use sf_api::{
 use sqlx::Sqlite;
 
 use super::{
-    debug::{handle_cheat_command, CheatCmd},
-    effective_mount, in_seconds, now, poll, xp_for_next_level,
     CommandArguments, Portrait, ResponseBuilder, ServerError, ServerResponse,
+    debug::{CheatCmd, handle_cheat_command},
+    effective_mount, in_seconds, now, poll, xp_for_next_level,
 };
 use crate::request::Session;
 
@@ -113,7 +113,7 @@ pub(crate) async fn player_whisper(
     use clap::Parser;
     let command = CheatCmd::try_parse_from(args.get_str(1, "args")?.split(' '))
         .map_err(|e| {
-            error!("Error while parsing command: {:?}", e);
+            error!("Error while parsing command: {e:?}");
             ServerError::BadRequest
         })?;
     handle_cheat_command(session, db, command).await
@@ -567,7 +567,7 @@ pub(crate) async fn player_get_hof(
                 "bg"
             ))
             .map_err(|e| {
-                error!("Error while writing format: {:?}", e);
+                error!("Error while writing format: {e:?}");
                 ServerError::Internal
             })?;
     }
@@ -894,7 +894,7 @@ pub(crate) async fn player_arena_fight(
     resp.add_val(0);
     resp.add_val(2); // rank pre
     resp.add_val(2); // rank post
-                     // Item
+    // Item
     for _ in 0..12 {
         resp.add_val(0);
     }
