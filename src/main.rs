@@ -67,7 +67,6 @@ static PROVIDE_HTTPS: bool = true;
 static HTTP_PORT: u16 = 6767;
 static HTTPS_PORT: u16 = 6768;
 
-#[allow(dead_code)]
 async fn redirect_http_to_https() {
     fn make_https(host: String, uri: Uri) -> Result<Uri, axum::BoxError> {
         let mut parts = uri.into_parts();

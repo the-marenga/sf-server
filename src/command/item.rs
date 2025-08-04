@@ -65,6 +65,7 @@ pub enum SubItemTyp {
     EpicItemBag = 10000,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum GemValue {
     Legendary = 4,
