@@ -31,9 +31,9 @@ pub(crate) async fn account_check(
 
     match count {
         0 => ResponseBuilder::default()
-            .add_key("serverversion")
+            .start_section("serverversion")
             .add_val(SERVER_VERSION)
-            .add_key("preregister")
+            .start_section("preregister")
             .add_val(0)
             .add_val(0)
             .build(),
@@ -216,7 +216,7 @@ pub(crate) async fn account_create(
     tx.commit().await?;
 
     ResponseBuilder::default()
-        .add_key("tracking.s")
+        .start_section("tracking.s")
         .add_str("signup")
         .build()
 }

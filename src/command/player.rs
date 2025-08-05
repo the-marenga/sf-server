@@ -220,7 +220,7 @@ pub(crate) async fn player_finish_quest(
 
     let mut resp = ResponseBuilder::default();
 
-    resp.add_key("fightresult.battlereward");
+    resp.start_section("fightresult.battlereward");
     resp.add_val(true as u8);
     // won
     resp.add_val(0);
@@ -233,7 +233,7 @@ pub(crate) async fn player_finish_quest(
         resp.add_val(0);
     }
 
-    resp.add_key("fightheader.fighters");
+    resp.start_section("fightheader.fighters");
     let monster_id = -monster;
     let mut character_lvl = row.level;
     let starting_character_xp = row.experience;
@@ -325,15 +325,15 @@ pub(crate) async fn player_finish_quest(
         resp.add_val(0);
     }
 
-    resp.add_key("fight.r");
+    resp.start_section("fight.r");
     resp.add_str(&format!("{},0,-1000", session.player_id));
 
     // TODO: actually simulate fight
 
-    resp.add_key("winnerid");
+    resp.start_section("winnerid");
     resp.add_val(session.player_id);
 
-    resp.add_key("fightversion");
+    resp.start_section("fightversion");
     resp.add_val(1);
 
     sqlx::query!(
@@ -418,9 +418,9 @@ pub(crate) async fn player_start_expedition(
 
     sqlx::query!(
         "INSERT INTO ActiveExpedition
-        (pid, target, encounter1, encounter2, encounter3, encounter4, boss_id)
+        (pid, target, encounter1, encounter2, encounter3, encounter4, boss_id, floor_stage)
         VALUES
-        ($1, $2, $3, $4, $5, $6, $7)
+        ($1, $2, $3, $4, $5, $6, $7, 1)
     ",
         session.player_id,
         char_data.target,
@@ -584,7 +584,7 @@ pub(crate) async fn player_gamble_gold(
     tx.commit().await?;
 
     ResponseBuilder::default()
-        .add_key("gamblegoldvalue")
+        .start_section("gamblegoldvalue")
         .add_val(silver)
         .build()
 }
@@ -665,7 +665,7 @@ pub(crate) async fn player_get_hof(
     }
 
     ResponseBuilder::default()
-        .add_key("Ranklistplayer.r")
+        .start_section("Ranklistplayer.r")
         .add_str(&characters)
         .build()
 }
@@ -770,9 +770,9 @@ pub(crate) async fn player_look_at(
     .fetch_one(db)
     .await?;
 
-    resp.add_key("otherplayergroupname.r");
+    resp.start_section("otherplayergroupname.r");
     resp.add_val("");
-    resp.add_key("otherplayer.playerlookat");
+    resp.start_section("otherplayer.playerlookat");
     resp.add_val(pid);
     resp.add_val(0);
     resp.add_val(info.level);
@@ -836,27 +836,27 @@ pub(crate) async fn player_look_at(
     for _ in 0..53 {
         resp.add_val(0);
     }
-    resp.add_key("otherdescription.s");
+    resp.start_section("otherdescription.s");
     resp.add_str(&info.description);
-    resp.add_key("otherplayername.r");
+    resp.start_section("otherplayername.r");
     resp.add_val(info.name);
-    resp.add_key("otherplayerunitlevel(4)");
+    resp.start_section("otherplayerunitlevel(4)");
     resp.add_val(190);
     resp.add_val(140);
     resp.add_val(145);
     resp.add_val(145);
-    resp.add_key("otherplayerfriendstatus");
+    resp.start_section("otherplayerfriendstatus");
     resp.add_val(0);
-    resp.add_key("otherplayerfortressrank");
+    resp.start_section("otherplayerfortressrank");
     resp.add_val(0);
-    resp.add_key("otherplayerpetbonus.petbonus");
+    resp.start_section("otherplayerpetbonus.petbonus");
     resp.add_val(207011);
     resp.add_val(7);
     resp.add_val(6);
     resp.add_val(6);
     resp.add_val(6);
     resp.add_val(6);
-    resp.add_key("soldieradvice");
+    resp.start_section("soldieradvice");
     resp.add_val(18);
     resp.build()
 }
@@ -875,10 +875,10 @@ pub(crate) async fn player_arena_fight(
     .await?;
 
     let mut resp = ResponseBuilder::default();
-    resp.add_key("fightversion");
+    resp.start_section("fightversion");
     resp.add_val(2);
 
-    resp.add_key("fightheader.fighters");
+    resp.start_section("fightheader.fighters");
     resp.add_val(0);
     resp.add_val(0);
     resp.add_val(0);
@@ -944,7 +944,7 @@ pub(crate) async fn player_arena_fight(
         }
     }
 
-    resp.add_key("fight.r");
+    resp.start_section("fight.r");
 
     let mut player_a_hp = starting_hp;
     let mut player_b_hp = starting_hp;
@@ -970,13 +970,13 @@ pub(crate) async fn player_arena_fight(
             break;
         }
     }
-    resp.add_key("winnerid");
+    resp.start_section("winnerid");
     resp.add_val(if player_a_hp > 0 {
         fighters[0]
     } else {
         fighters[1]
     });
-    resp.add_key("fightresult.battlereward");
+    resp.start_section("fightresult.battlereward");
     resp.add_val((player_a_hp > 0) as i32); // have we won?
     resp.add_val(1);
     resp.add_val(0); // silver

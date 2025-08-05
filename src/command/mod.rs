@@ -100,20 +100,20 @@ async fn pending_reward_view(
 ) -> Result<ServerResponse, ServerError> {
     let _id = args.get_int(0, "msg_id")?;
     let mut resp = ResponseBuilder::default();
-    resp.add_key("pendingrewardressources");
+    resp.start_section("pendingrewardressources");
     for v in 1..=6 {
         let val = v;
         resp.add_val(val);
         resp.add_val(999);
     }
-    resp.add_key("pendingreward.item(0)");
+    resp.start_section("pendingreward.item(0)");
 
     resp.build()
 }
 
 fn player_helpshift_auth_token() -> Result<ServerResponse, ServerError> {
     ResponseBuilder::default()
-        .add_key("helpshiftauthtoken")
+        .start_section("helpshiftauthtoken")
         .add_val("+eZGNZyCPfOiaufZXr/WpzaaCNHEKMmcT7GRJOGWJAU=")
         .build()
 }
@@ -135,20 +135,20 @@ async fn get_server_version(
     .await?;
 
     ResponseBuilder::default()
-        .add_key("serverversion")
+        .start_section("serverversion")
         .add_val(SERVER_VERSION)
-        .add_key("preregister")
+        .start_section("preregister")
         .add_val(now())
         .add_val(now())
         .add_str("Europe")
         .add_str("Berlin")
-        .add_key("timestamp")
+        .start_section("timestamp")
         .add_val(now())
-        .add_key("rankmaxplayer")
+        .start_section("rankmaxplayer")
         .add_val(res.charactercount)
-        .add_key("rankmaxgroup")
+        .start_section("rankmaxgroup")
         .add_val(res.guildcount)
-        .add_key("country")
+        .start_section("country")
         .add_val("DE")
         .build()
 }
