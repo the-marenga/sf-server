@@ -18,12 +18,14 @@ pub(crate) async fn poll(
     mut builder: ResponseBuilder,
 ) -> Result<ServerResponse, ServerError> {
     let resp = builder
-        .add_key("serverversion")
+        .start_section("serverversion")
         .add_val(SERVER_VERSION)
-        .add_key("preregister")
+        .start_section("preregister")
         .add_val(0) // TODO: This has values
         .add_val(0)
         .skip_key();
+
+    let mut tx = db.begin().await?;
 
     let char = sqlx::query!(
         "SELECT
@@ -97,7 +99,6 @@ pub(crate) async fn poll(
         character.name,
 
         portrait.influencer,
-
         (
         SELECT count(*)
         FROM CHARACTER AS x
@@ -122,78 +123,78 @@ pub(crate) async fn poll(
          WHERE character.pid = $1",
         session.player_id
     )
-    .fetch_one(db)
+    .fetch_one(&mut *tx)
     .await?;
 
     let calendar_info = "12/1/8/1/3/1/25/1/5/1/2/1/3/2/1/1/24/1/18/5/6/1/22/1/\
                          7/1/6/2/8/2/22/2/5/2/2/2/3/3/21/1";
 
-    resp.add_key("messagelist.r");
+    resp.start_section("messagelist.r");
     resp.add_str(";");
 
-    resp.add_key("combatloglist.s");
+    resp.start_section("combatloglist.s");
     resp.add_str(";");
 
-    resp.add_key("friendlist.r");
+    resp.start_section("friendlist.r");
     resp.add_str(";");
 
-    resp.add_key("login count");
+    resp.start_section("login count");
     resp.add_val(session.login_count);
 
     resp.skip_key();
 
-    resp.add_key("sessionid");
+    resp.start_section("sessionid");
     resp.add_str(&session.session_id);
 
-    resp.add_key("languagecodelist");
+    resp.start_section("languagecodelist");
     resp.add_str(
         "ru,20;fi,8;ar,1;tr,23;nl,16;  \
          ,0;ja,14;it,13;sk,21;fr,9;ko,15;pl,17;cs,2;el,5;da,3;en,6;hr,10;de,4;\
          zh,24;sv,22;hu,11;pt,12;es,7;pt-br,18;ro,19;",
     );
 
-    resp.add_key("languagecodelist.r");
+    resp.start_section("languagecodelist.r");
 
-    resp.add_key("maxpetlevel");
+    resp.start_section("maxpetlevel");
     resp.add_val(100);
 
-    resp.add_key("calenderinfo");
+    resp.start_section("calenderinfo");
     resp.add_val(calendar_info);
 
     resp.skip_key();
 
-    resp.add_key("tavernspecial");
+    resp.start_section("tavernspecial");
     resp.add_val(0); // 100 if event active
-    resp.add_key("tavernspecialsub");
+    resp.start_section("tavernspecialsub");
     resp.add_val(0); // 1 << Event
 
-    resp.add_key("tavernspecialend");
+    resp.start_section("tavernspecialend");
     resp.add_val(in_seconds(600));
 
-    resp.add_key("attbonus1(3)");
+    resp.start_section("attbonus1(3)");
     resp.add_str("0/0/0/0");
-    resp.add_key("attbonus2(3)");
+    resp.start_section("attbonus2(3)");
     resp.add_str("0/0/0/0");
-    resp.add_key("attbonus3(3)");
+    resp.start_section("attbonus3(3)");
     resp.add_str("0/0/0/0");
-    resp.add_key("attbonus4(3)");
+    resp.start_section("attbonus4(3)");
     resp.add_str("0/0/0/0");
-    resp.add_key("attbonus5(3)");
+    resp.start_section("attbonus5(3)");
     resp.add_str("0/0/0/0");
 
-    resp.add_key("stoneperhournextlevel");
+    resp.start_section("stoneperhournextlevel");
     resp.add_val(50);
 
-    resp.add_key("woodperhournextlevel");
+    resp.start_section("woodperhournextlevel");
     resp.add_val(150);
 
-    resp.add_key("fortresswalllevel");
+    resp.start_section("fortresswalllevel");
     resp.add_val(5);
 
-    resp.add_key("inboxcapacity");
+    resp.start_section("inboxcapacity");
     resp.add_val(100);
 
-    resp.add_key("ownplayersave.playerSave");
+    resp.start_section("ownplayersave.playerSave");
     resp.add_val(403127023); // What is this?
     resp.add_val(session.player_id);
     resp.add_val(0);
@@ -683,7 +684,7 @@ pub(crate) async fn poll(
     resp.add_val(0); // 757
     resp.add_str(""); // 758
 
-    resp.add_key("resources");
+    resp.start_section("resources");
     resp.add_val(session.player_id); // pid
     resp.add_val(char.mushrooms); // mushrooms
     resp.add_val(char.silver); // silver
@@ -701,31 +702,31 @@ pub(crate) async fn poll(
         resp.add_val(0);
     }
 
-    resp.add_key("owndescription.s");
+    resp.start_section("owndescription.s");
     resp.add_str(&to_sf_string(&char.description));
 
-    resp.add_key("ownplayername.r");
+    resp.start_section("ownplayername.r");
     resp.add_str(&char.name);
 
     let maxrank = char.maxrank;
 
-    resp.add_key("maxrank");
+    resp.start_section("maxrank");
     resp.add_val(maxrank);
 
-    resp.add_key("skipallow");
+    resp.start_section("skipallow");
     resp.add_val(0);
 
-    resp.add_key("skipvideo");
+    resp.start_section("skipvideo");
     resp.add_val(0);
 
-    resp.add_key("fortresspricereroll");
+    resp.start_section("fortresspricereroll");
     resp.add_val(18);
 
-    resp.add_key("timestamp");
+    resp.start_section("timestamp");
 
     resp.add_val(now());
 
-    resp.add_key("fortressprice.fortressPrice(13)");
+    resp.start_section("fortressprice.fortressPrice(13)");
     resp.add_str(
         "900/1000/0/0/900/500/35/12/900/200/0/0/900/300/22/0/900/1500/50/17/\
          900/700/7/9/900/500/41/7/900/400/20/14/900/600/61/20/900/2500/40/13/\
@@ -734,57 +735,57 @@ pub(crate) async fn poll(
 
     resp.skip_key();
 
-    resp.add_key("unitprice.fortressPrice(3)");
+    resp.start_section("unitprice.fortressPrice(3)");
     resp.add_str("600/0/15/5/600/0/11/6/300/0/19/3/");
 
-    resp.add_key("upgradeprice.upgradePrice(3)");
+    resp.start_section("upgradeprice.upgradePrice(3)");
     resp.add_val("28/270/210/28/720/60/28/360/180/");
 
-    resp.add_key("unitlevel(4)");
+    resp.start_section("unitlevel(4)");
     resp.add_val("5/25/25/25/");
 
     resp.skip_key();
     resp.skip_key();
 
-    resp.add_key("petsdefensetype");
+    resp.start_section("petsdefensetype");
     resp.add_val(3);
 
-    resp.add_key("singleportalenemylevel");
+    resp.start_section("singleportalenemylevel");
     resp.add_val(0);
 
     resp.skip_key();
 
-    resp.add_key("wagesperhour");
+    resp.start_section("wagesperhour");
     resp.add_val(10);
 
     resp.skip_key();
 
-    resp.add_key("dragongoldbonus");
+    resp.start_section("dragongoldbonus");
     resp.add_val(30);
 
-    resp.add_key("toilettfull");
+    resp.start_section("toilettfull");
     resp.add_val(0);
 
-    resp.add_key("maxupgradelevel");
+    resp.start_section("maxupgradelevel");
     resp.add_val(20);
 
-    resp.add_key("cidstring");
+    resp.start_section("cidstring");
     resp.add_str("no_cid");
 
     if !tracking.is_empty() {
-        resp.add_key("tracking.s");
+        resp.start_section("tracking.s");
         resp.add_str(tracking);
     }
 
-    resp.add_key("calenderinfo");
+    resp.start_section("calenderinfo");
     resp.add_str(calendar_info);
 
     resp.skip_key();
 
-    resp.add_key("iadungeontime");
+    resp.start_section("iadungeontime");
     resp.add_str("5/1702656000/1703620800/1703707200");
 
-    resp.add_key("achievement(208)");
+    resp.start_section("achievement(208)");
     resp.add_str(
         "0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
          0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
@@ -795,19 +796,19 @@ pub(crate) async fn poll(
          0/0/0/0/",
     );
 
-    resp.add_key("scrapbook.r");
+    resp.start_section("scrapbook.r");
     resp.add_str("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
 
-    resp.add_key("smith");
+    resp.start_section("smith");
     resp.add_str("5/0");
 
-    resp.add_key("owntowerlevel");
+    resp.start_section("owntowerlevel");
     resp.add_val(0);
 
-    resp.add_key("webshopid");
+    resp.start_section("webshopid");
     resp.add_str("Q7tGCJhe$r464");
 
-    resp.add_key("dailytasklist");
+    resp.start_section("dailytasklist");
     resp.add_val(98);
     for typ_id in 1..=10 {
         resp.add_val(typ_id); // typ
@@ -816,7 +817,7 @@ pub(crate) async fn poll(
         resp.add_val(10); // reward
     }
 
-    resp.add_key("eventtasklist");
+    resp.start_section("eventtasklist");
     for typ_id in 1..=99 {
         if typ_id == 73 {
             continue;
@@ -827,19 +828,19 @@ pub(crate) async fn poll(
         resp.add_val(typ_id); // reward
     }
 
-    resp.add_key("dailytaskrewardpreview");
+    resp.start_section("dailytaskrewardpreview");
     add_reward_previews(resp);
 
-    resp.add_key("eventtaskrewardpreview");
+    resp.start_section("eventtaskrewardpreview");
 
     add_reward_previews(resp);
 
-    resp.add_key("eventtaskinfo");
+    resp.start_section("eventtaskinfo");
     resp.add_val(1708300800);
     resp.add_val(1798646399);
     resp.add_val(2); // event typ
 
-    resp.add_key("unlockfeature");
+    resp.start_section("unlockfeature");
 
     let dungeon_progress_light = [
         0,  // DesecratedCatacombs = 0,
@@ -881,7 +882,7 @@ pub(crate) async fn poll(
         5,  // Meeting room = 36
     ];
 
-    resp.add_key(&format!(
+    resp.start_section(&format!(
         "dungeonprogresslight({})",
         dungeon_progress_light.len()
     ));
@@ -929,7 +930,7 @@ pub(crate) async fn poll(
         5,   // Meeting room = 36
     ];
 
-    resp.add_key(&format!(
+    resp.start_section(&format!(
         "dungeonprogressshadow({})",
         dungeon_progress_shadow.len()
     ));
@@ -939,14 +940,14 @@ pub(crate) async fn poll(
 
     let dungeon_info = calc_dungeon_progress(&dungeon_progress_light, false);
 
-    resp.add_key(&format!("dungeonenemieslight({})", dungeon_info.len()));
+    resp.start_section(&format!("dungeonenemieslight({})", dungeon_info.len()));
     for dungeon in &dungeon_info {
         resp.add_val(dungeon.enemy.monster_name);
         resp.add_val(dungeon.id);
         resp.add_val(dungeon.enemy.loot);
     }
 
-    resp.add_key(&format!(
+    resp.start_section(&format!(
         "currentdungeonenemieslight({})",
         dungeon_info.iter().filter(|a| a.is_current).count()
     ));
@@ -960,14 +961,17 @@ pub(crate) async fn poll(
 
     let dungeon_info = calc_dungeon_progress(&dungeon_progress_shadow, true);
 
-    resp.add_key(&format!("dungeonenemiesshadow({})", dungeon_info.len()));
+    resp.start_section(&format!(
+        "dungeonenemiesshadow({})",
+        dungeon_info.len()
+    ));
     for dungeon in &dungeon_info {
         resp.add_val(dungeon.enemy.monster_name);
         resp.add_val(dungeon.id);
         resp.add_val(dungeon.enemy.loot);
     }
 
-    resp.add_key(&format!(
+    resp.start_section(&format!(
         "currentdungeonenemiesshadow({})",
         dungeon_info.iter().filter(|a| a.is_current).count()
     ));
@@ -979,51 +983,117 @@ pub(crate) async fn poll(
         resp.add_val(dungeon.enemy.element);
     }
 
-    resp.add_key("portalprogress(3)");
+    resp.start_section("portalprogress(3)");
     resp.add_val("27/100/194");
 
     resp.skip_key();
 
-    resp.add_key("expeditions");
-    resp.add_val(33);
-    resp.add_val(71);
-    resp.add_val(32);
-    resp.add_val(91);
-    resp.add_val(10);
-    resp.add_val(5);
-    resp.add_val(1500);
-    resp.add_val(0);
+    let expeditions = sqlx::query!(
+        "SELECT target, alu_sec, location_1, location_2
+        FROM expedition
+        WHERE pid = $1",
+        session.player_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
 
-    resp.add_val(124);
-    resp.add_val(44);
-    resp.add_val(91);
-    resp.add_val(71);
-    resp.add_val(16);
-    resp.add_val(5);
-    resp.add_val(6000);
-    resp.add_val(0);
+    resp.start_section("expeditions");
+    for exp in expeditions {
+        resp.add_val(exp.target); // typ
+        resp.add_val(71); // ??
+        resp.add_val(32); // ??
+        resp.add_val(91); // ??
+        resp.add_val(exp.location_1); // location 1
+        resp.add_val(exp.location_2); // location 2
+        resp.add_val(exp.alu_sec); // alu
+        resp.add_val(0); // 1 => egg, 2 => inc. daily task
+    }
 
-    resp.add_key("expeditionevent");
+    resp.start_section("expeditionevent");
     resp.add_val(in_seconds(-60 * 60));
     resp.add_val(in_seconds(60 * 60));
     resp.add_val(1);
     resp.add_val(in_seconds(60 * 60));
 
-    resp.add_key("usersettings");
+    let active_expedition = sqlx::query!(
+        "SELECT * FROM ActiveExpedition WHERE pid = $1", session.player_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if let Some(exp) = active_expedition {
+        resp.start_section("expeditionstate");
+        resp.add_val(exp.current_floor);
+        resp.add_val(14); // location
+        resp.add_val(exp.floor_stage);
+        resp.add_val(exp.target);
+        resp.add_val(124); // 4
+        resp.add_val(32); // 5
+        resp.add_val(83); // 6
+        resp.add_val(exp.target_current); // 7
+        resp.add_val(exp.target_amount); // 8
+        resp.add_val(exp.item1.unwrap_or(0)); // 9
+        resp.add_val(exp.item2.unwrap_or(0)); // 10
+        resp.add_val(exp.item3.unwrap_or(0)); // 11
+        resp.add_val(exp.item4.unwrap_or(0)); // 12
+        resp.add_val(exp.heroism); // 13
+        resp.add_val(0); // busy since
+        resp.add_val(0); // busy until
+        resp.add_val(0); // ??
+        resp.add_val(5); // ??
+        resp.add_val(-5); // ??
+        resp.add_val(0); // ??
+        resp.add_val(1); // ??
+
+        resp.start_section("expeditioncrossroad");
+
+        for enc in [exp.encounter1, exp.encounter2, exp.encounter3] {
+            if enc == 0 {
+                break;
+            }
+            resp.add_val(enc); // encounter type
+            resp.add_val(10); // Heroism for encounter
+        }
+
+        // expeditionstate:5/1/3/124/71/0/0/0/1/122/1012/0/0/-4/0/0/0/10/-5/0/1&
+        // expeditioncrossroad:123/-5/123/-5/131/0&
+        // expeditionmonster:-145/&
+        // expeditionhalftime:-145/6/6/4/219/26/1&
+        // expeditionevent:1754321308/1754494108/1/1754494108&
+
+        if exp.current_floor == 5 {
+            if exp.floor_stage == 2 {
+                resp.start_section("expeditionmonster");
+                resp.add_val(-exp.boss_id);
+                resp.add_str(""); // Number of items
+            } else if exp.floor_stage == 3 {
+                resp.start_section("expeditionhalftime");
+                resp.add_val(-exp.boss_id);
+                resp.add_val(exp.reward1_type);
+                resp.add_val(exp.reward1_amount);
+                resp.add_val(exp.reward2_type);
+                resp.add_val(exp.reward2_amount);
+                resp.add_val(exp.reward3_type);
+                resp.add_val(exp.reward3_amount);
+            }
+        }
+    }
+
+    resp.start_section("usersettings");
     resp.add_str("en");
     resp.add_val(0);
     resp.add_val(0);
     resp.add_val(0);
-    resp.add_str("0");
+    resp.add_str("a");
     resp.add_val(0);
 
-    resp.add_key("mailinvoice");
+    resp.start_section("mailinvoice");
     resp.add_str("a*******@a****.***");
 
-    resp.add_key("cryptoid");
+    resp.start_section("cryptoid");
     resp.add_val(session.crypto_id);
 
-    resp.add_key("cryptokey");
+    resp.start_section("cryptokey");
     resp.add_val(session.crypto_key);
 
     // resp.add_key("pendingrewards");
@@ -1035,6 +1105,8 @@ pub(crate) async fn poll(
     //     resp.add_val(1717777586);
     //     resp.add_val(1718382386);
     // }
+
+    tx.commit().await?;
 
     resp.build()
 }
