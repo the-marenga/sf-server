@@ -374,29 +374,89 @@ pub(crate) async fn player_start_expedition(
 ) -> Result<ServerResponse, ServerError> {
     let mut tx = db.begin().await?;
 
-    let existing = sqlx::query!(
-        "SELECT pid FROM ActiveExpedition WHERE pid = $1", session.player_id
+    let exp_val = args.get_int(0, "expedition")?;
+    let expedition = match exp_val {
+        1 => 0,
+        2 => 1,
+        _ => return Err(ServerError::MissingArgument("expedition")),
+    };
+
+    let char_data = sqlx::query!(
+        "SELECT typ, mount, mount_end, tfa,
+            target, alu_sec, location_1, location_2
+            FROM character
+            NATURAL JOIN activity
+            NATURAL JOIN tavern
+            NATURAL JOIN expedition
+            WHERE pid = $1
+            ORDER BY expedition.id
+            LIMIT 1 OFFSET $2",
+        session.player_id,
+        expedition
     )
     .fetch_optional(&mut *tx)
     .await?;
 
-    if existing.is_some() {
+    let Some(char_data) = char_data else {
+        return Err(ServerError::Internal);
+    };
+
+    if char_data.typ != 0 {
         return Err(ServerError::StillBusy);
     }
 
-    let expedition = args.get_int(0, "expedition")?;
+    let mut mount = char_data.mount;
+    let mut mount_end = char_data.mount_end;
+    let mount_effect = effective_mount(&mut mount_end, &mut mount);
 
-    let exp_data = sqlx::query!(
-        "SELECT target, alu_sec, location_1, location_2
-         FROM Expedition WHERE pid = $1 ORDER BY id",
-        session.player_id
+    let exp_length = char_data.alu_sec as f32 * mount_effect.ceil().max(0.0);
+    let exp_length = exp_length as i64;
+
+    if char_data.tfa < exp_length {
+        return Err(ServerError::StillBusy);
+    }
+
+    sqlx::query!(
+        "INSERT INTO ActiveExpedition
+        (pid, target, encounter1, encounter2, encounter3, encounter4, boss_id)
+        VALUES
+        ($1, $2, $3, $4, $5, $6, $7)
+    ",
+        session.player_id,
+        char_data.target,
+        1,
+        1,
+        1,
+        1,
+        100
     )
-    .fetch_all(&mut *tx)
+    .execute(&mut *tx)
     .await?;
 
-    // INIT an expedition from the data
+    sqlx::query!(
+        "UPDATE activity set typ = 3,
+        sub_type = $2,
+        started = CURRENT_TIMESTAMP
+        WHERE pid = $1",
+        session.player_id,
+        exp_val
+    )
+    .execute(&mut *tx)
+    .await?;
 
-    todo!()
+    sqlx::query!(
+        "UPDATE tavern
+            SET tfa = max(0, tfa - $2)
+            WHERE pid = $1",
+        session.player_id,
+        exp_length
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    poll(session, "", db, Default::default()).await
 }
 
 pub(crate) async fn player_start_quest(
