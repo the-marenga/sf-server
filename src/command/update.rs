@@ -1015,18 +1015,18 @@ pub(crate) async fn poll(
     resp.add_val(1);
     resp.add_val(in_seconds(60 * 60));
 
-    let expedition = sqlx::query!(
+    let active_expedition = sqlx::query!(
         "SELECT * FROM ActiveExpedition WHERE pid = $1", session.player_id
     )
     .fetch_optional(&mut *tx)
     .await?;
 
-    if let Some(exp) = expedition {
+    if let Some(exp) = active_expedition {
         resp.start_section("expeditionstate");
         resp.add_val(exp.current_floor);
-        resp.add_val(14); // ??
+        resp.add_val(14); // location
         resp.add_val(exp.floor_stage);
-        resp.add_val(exp.target); // 3
+        resp.add_val(exp.target);
         resp.add_val(124); // 4
         resp.add_val(32); // 5
         resp.add_val(83); // 6
@@ -1053,6 +1053,29 @@ pub(crate) async fn poll(
             }
             resp.add_val(enc); // encounter type
             resp.add_val(10); // Heroism for encounter
+        }
+
+        // expeditionstate:5/1/3/124/71/0/0/0/1/122/1012/0/0/-4/0/0/0/10/-5/0/1&
+        // expeditioncrossroad:123/-5/123/-5/131/0&
+        // expeditionmonster:-145/&
+        // expeditionhalftime:-145/6/6/4/219/26/1&
+        // expeditionevent:1754321308/1754494108/1/1754494108&
+
+        if exp.current_floor == 5 {
+            if exp.floor_stage == 2 {
+                resp.start_section("expeditionmonster");
+                resp.add_val(-exp.boss_id);
+                resp.add_str(""); // Number of items
+            } else if exp.floor_stage == 3 {
+                resp.start_section("expeditionhalftime");
+                resp.add_val(-exp.boss_id);
+                resp.add_val(exp.reward1_type);
+                resp.add_val(exp.reward1_amount);
+                resp.add_val(exp.reward2_type);
+                resp.add_val(exp.reward2_amount);
+                resp.add_val(exp.reward3_type);
+                resp.add_val(exp.reward3_amount);
+            }
         }
     }
 
