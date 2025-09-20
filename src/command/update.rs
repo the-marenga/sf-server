@@ -247,8 +247,8 @@ pub(crate) async fn poll(
         resp.add_val(0); // 40..=44
     }
 
-    resp.add_val(char.activitytyp); // Current action
-    resp.add_val(char.activitysubtyp); // Secondary (time busy)
+    resp.add_val(0); // Current action
+    resp.add_val(0); // Secondary (time busy)
     resp.add_val(char.busy_until); // Busy until
 
     // Equipment
@@ -393,8 +393,8 @@ pub(crate) async fn poll(
     resp.add_val(0); // 489
     resp.add_val(0); // 490
 
-    resp.add_val(0); // 491 aura_level (0 == locked)
-    resp.add_val(0); // 492 aura_now
+    resp.add_val(500); // 491 aura_level (0 == locked)
+    resp.add_val(100); // 492 aura_now
 
     // Active potions
     for _ in 0..3 {
@@ -1095,6 +1095,52 @@ pub(crate) async fn poll(
 
     resp.start_section("cryptokey");
     resp.add_val(session.crypto_key);
+
+    resp.start_section("toiletstate");
+    resp.add_val(100); // Aura required maybe? Seems to do nothing rn
+    resp.add_val(0); // Might be overflow
+    resp.add_val(1);
+
+    resp.start_section("ownplayersaveequipment");
+    let vals = [
+        [6, 1, 61, 2008, 10, 1315, 0, 2, 0, 31, 755, 0, 12, 64237500, 0, 0, 0, 0, 0],
+        [3, 25, 31, 2063, 50, 1589, 0, 6, 0, 34, 379, 0, 3, 200000000, 0, 0, 259, 0, 0],
+        [5, 24, 51, 2010, 1, 1959, 0, 2, 5, 4, 748, 0, 0, 50761792, 0, 0, 398, 0, 0],
+        [4, 25, 41, 2054, 30, 982, 0, 22, 0, 32, 389, 0, 12, 159711312, 0, 0, 237, 0, 0],
+        [8, 1, 81, 11, 10, 0, 0, 2, 0, 0, 756, 0, 0, 157096290, 0, 0, 0, 0, 0],
+        [7, 1, 71, 2010, 1, 1548, 0, 2, 0, 0, 760, 0, 0, 63002228, 0, 0, 0, 0, 0],
+        [9, 1, 91, 8, 10, 0, 0, 2, 0, 0, 763, 0, 0, 55415228, 0, 0, 0, 0, 0],
+        [10, 1, 101, 15, 20, 0, 0, 2, 0, 0, 740, 0, 0, 46696042, 0, 0, 0, 0, 0],
+        [1, 1, 11, 30, 5, 415, 1101, 4, 0, 0, 747, 0, 0, 59738715, 0, 0, 0, 0, 0],
+        [1, 1, 11, 30, 5, 415, 1101, 4, 0, 0, 747, 0, 0, 59738715, 0, 0, 0, 0, 0],
+        // 1/1/11/2010/5/ 518/1376/1/0/0/1494/0/0/59738715/0/0/0/0/1
+    ];
+
+    for item in vals {
+        for v in item {
+            // [0] => item type
+            // [1] => gem slot / type
+            // [2] => Enchantment
+            // [3] => model id / class / sub ident
+            // [4] => enchantment effect
+            // [5] => min_attack / armor.   [color]
+            // [6] => max_attack            [color]
+            // [7] => atr typ 1 / rune      [color]
+            // [8] => atr typ 2 / rune      [color]
+            // [9] => atr typ 3 / rune      [color]
+            // [10] => atr val 1            [color]
+            // [11] => atr val 2            [color]
+            // [12] => atr val 3            [color]
+            // [13] => sell price
+            // [14] => probably mushroom price
+            // [15] => upgrade_count (blacksmith)
+            // [16] => gem val
+            // [17] => item quality
+            // [18] => is_washed
+            resp.add_val(v);
+        }
+    }
+
 
     // resp.add_key("pendingrewards");
     // for i in 0..10 {
