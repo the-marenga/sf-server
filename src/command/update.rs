@@ -782,9 +782,6 @@ pub(crate) async fn poll(
 
     resp.skip_key();
 
-    resp.start_section("iadungeontime");
-    resp.add_str("5/1702656000/1703620800/1703707200");
-
     resp.start_section("achievement(208)");
     resp.add_str(
         "0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/\
@@ -1103,16 +1100,45 @@ pub(crate) async fn poll(
 
     resp.start_section("ownplayersaveequipment");
     let vals = [
-        [6, 1, 61, 2008, 10, 1315, 0, 2, 0, 31, 755, 0, 12, 64237500, 0, 0, 0, 0, 0],
-        [3, 25, 31, 2063, 50, 1589, 0, 6, 0, 34, 379, 0, 3, 200000000, 0, 0, 259, 0, 0],
-        [5, 24, 51, 2010, 1, 1959, 0, 2, 5, 4, 748, 0, 0, 50761792, 0, 0, 398, 0, 0],
-        [4, 25, 41, 2054, 30, 982, 0, 22, 0, 32, 389, 0, 12, 159711312, 0, 0, 237, 0, 0],
-        [8, 1, 81, 11, 10, 0, 0, 2, 0, 0, 756, 0, 0, 157096290, 0, 0, 0, 0, 0],
-        [7, 1, 71, 2010, 1, 1548, 0, 2, 0, 0, 760, 0, 0, 63002228, 0, 0, 0, 0, 0],
-        [9, 1, 91, 8, 10, 0, 0, 2, 0, 0, 763, 0, 0, 55415228, 0, 0, 0, 0, 0],
-        [10, 1, 101, 15, 20, 0, 0, 2, 0, 0, 740, 0, 0, 46696042, 0, 0, 0, 0, 0],
-        [1, 1, 11, 30, 5, 415, 1101, 4, 0, 0, 747, 0, 0, 59738715, 0, 0, 0, 0, 0],
-        [1, 1, 11, 30, 5, 415, 1101, 4, 0, 0, 747, 0, 0, 59738715, 0, 0, 0, 0, 0],
+        [
+            6, 1, 61, 2008, 10, 1315, 0, 2, 0, 31, 755, 0, 12, 64237500, 0, 0,
+            0, 0, 0,
+        ],
+        [
+            3, 25, 31, 2063, 50, 1589, 0, 6, 0, 34, 379, 0, 3, 200000000, 0, 0,
+            259, 0, 0,
+        ],
+        [
+            5, 24, 51, 2010, 1, 1959, 0, 2, 5, 4, 748, 0, 0, 50761792, 0, 0,
+            398, 0, 0,
+        ],
+        [
+            4, 25, 41, 2054, 30, 982, 0, 22, 0, 32, 389, 0, 12, 159711312, 0,
+            0, 237, 0, 0,
+        ],
+        [
+            8, 1, 81, 11, 10, 0, 0, 2, 0, 0, 756, 0, 0, 157096290, 0, 0, 0, 0,
+            0,
+        ],
+        [
+            7, 1, 71, 2010, 1, 1548, 0, 2, 0, 0, 760, 0, 0, 63002228, 0, 0, 0,
+            0, 0,
+        ],
+        [
+            9, 1, 91, 8, 10, 0, 0, 2, 0, 0, 763, 0, 0, 55415228, 0, 0, 0, 0, 0,
+        ],
+        [
+            10, 1, 101, 15, 20, 0, 0, 2, 0, 0, 740, 0, 0, 46696042, 0, 0, 0, 0,
+            0,
+        ],
+        [
+            1, 1, 11, 30, 5, 415, 1101, 4, 0, 0, 747, 0, 0, 59738715, 0, 0, 0,
+            0, 0,
+        ],
+        [
+            1, 1, 11, 30, 5, 415, 1101, 4, 0, 0, 747, 0, 0, 59738715, 0, 0, 0,
+            0, 0,
+        ],
         // 1/1/11/2010/5/ 518/1376/1/0/0/1494/0/0/59738715/0/0/0/0/1
     ];
 
@@ -1141,6 +1167,142 @@ pub(crate) async fn poll(
         }
     }
 
+    resp.start_section("iamap");
+    resp.add_val(25);
+    resp.add_val(-5159);
+
+    // 0 => max 0
+    // 1..=4 => max 1
+    // 5..=8 => max 2
+    // 9..=12 => max 3
+    // 13.. => max 4
+    resp.add_val(9); // Removes other?
+    // -315 => 0 / X
+    // 315 => 1 / X
+    resp.add_val(315);
+
+    resp.add_val(25);
+    resp.add_val(-5160);
+    resp.add_val(9);
+    resp.add_val(-315);
+
+    resp.add_val(25);
+    resp.add_val(-5172);
+    resp.add_val(9);
+    resp.add_val(-315);
+
+    resp.add_val(25);
+    resp.add_val(-5168);
+    resp.add_val(9);
+    resp.add_val(-315);
+
+    resp.start_section("iamerchant");
+    resp.add_val(102);
+    resp.add_val(40100);
+    resp.add_val(5);
+
+    resp.add_val(3);
+    resp.add_val(50080);
+    resp.add_val(0);
+
+    resp.start_section("iadungeonstats");
+    resp.add_val(100); // items looted
+    resp.add_val(17); // epic items looted
+    resp.add_val(300); // keys found
+    resp.add_val(1846722900); // silver found
+    resp.add_val(1); // attempts
+
+    resp.start_section("iadungeonstatstotal");
+    resp.add_val(69);
+    resp.add_val(420);
+    resp.add_val(5);
+    resp.add_val(77);
+    resp.add_val(1846722900);
+    resp.add_val(2); // Unknown
+
+    resp.start_section("iadungeon.iadungeonsave");
+
+    resp.add_val(993073103);
+
+    // Player health status?
+    resp.add_val(2); // healing hp ?
+    // 0 => healing
+    // 1 => allowed to enter?
+    // 2 => alive
+
+    resp.add_val(-511294); // current hp
+    resp.add_val(553143); // pre attack hp
+
+    resp.add_val(7642555); // total hp
+
+    resp.add_val(0); // blessing type
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.add_val(0); // curse type?
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.add_val(0); // blessing duration & strength
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.add_val(0); // curse 1 duration
+
+    resp.add_val(101); // stage (15) // Finished?
+    resp.add_val(0); // stage extra?
+
+    resp.add_val(25); // current floor
+    resp.add_val(100); // max floor
+
+    resp.add_val(1); // 19 // left door & room type
+    resp.add_val(0); // 20 // right door type
+
+    resp.add_val(0);
+
+    resp.add_val(-5159); // 22 encounter type
+
+    resp.add_val(0); // appeared after death
+    resp.add_val(0);
+
+    resp.add_val(0); // trap left
+    resp.add_val(0); // trap right
+
+    // Item
+    for _ in 0..12 {
+        resp.add_val(0);
+    }
+
+    resp.add_val(1); // keys
+    resp.add_val(0); // 40
+    resp.add_val(0);
+
+    resp.add_val(0); // 42
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.add_val(0);
+    resp.add_val(0); // 49
+
+    resp.start_section("iadungeontime");
+    resp.add_val(1);
+    resp.add_val(in_seconds(-600));
+    resp.add_val(in_seconds(6000));
+    resp.add_val(in_seconds(6000 + ((60 * 60) * 24)));
+
+    resp.start_section("iadungeon20cost");
+    resp.add_str("10");
+
+    // 18 =>
+    resp.start_section("iadungeonsoulstones");
+    resp.add_str("0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0");
+    resp.add_str("4/1/1/0/0/30");
+    resp.add_str("5/10/1/0/0/31");
+    resp.add_str("6/30/1/0/0/32");
 
     // resp.add_key("pendingrewards");
     // for i in 0..10 {
