@@ -1,5 +1,7 @@
 use sf_api::{
-    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
+    command::AttributeType,
+    gamestate::{items::EquipmentSlot, rewards::Event},
+    misc::to_sf_string,
 };
 use sqlx::Sqlite;
 use strum::IntoEnumIterator;
@@ -164,12 +166,309 @@ pub(crate) async fn poll(
     resp.skip_key();
 
     resp.start_section("tavernspecial");
-    resp.add_val(0); // 100 if event active
+    resp.add_val(100); // 100 if event active
     resp.start_section("tavernspecialsub");
-    resp.add_val(0); // 1 << Event
+    resp.add_val(1 << 17);
 
     resp.start_section("tavernspecialend");
     resp.add_val(in_seconds(600));
+
+    // resp.start_section("adventscalendar");
+    // resp.add_val("3");
+    // resp.add_val("100");
+
+    resp.start_section("eventstatus");
+    resp.add_val(6);
+    resp.add_val(2);
+    resp.add_val(in_seconds(-100));
+    resp.add_val(in_seconds(999999));
+    resp.add_val(in_seconds(999999));
+
+    resp.start_section("wbcharacter");
+    resp.add_val(6969); // catalyst
+    resp.add_val(420); // medals
+    resp.add_val(50); // rank
+    resp.add_val(1); // lvl
+
+    resp.add_val(100); // ???
+
+    resp.add_val(in_seconds(60)); // next atk
+    resp.add_val(2550); // dmg per atk
+    resp.add_val(121); // ???
+    resp.add_val(121); // ???
+    resp.add_val(20_000); // dmg per hour
+    resp.add_val(1007); // loot per hour
+    resp.add_val(433); // comparative
+
+    resp.add_val(100); // chests
+
+    resp.add_val(121); // ???
+
+    resp.add_val(in_seconds(9999)); // reward dist
+
+    // The chest we got
+    resp.start_section("wbdailychests");
+    resp.add_val(1);
+    resp.add_val(1);
+    resp.add_val(1);
+    resp.add_val(1);
+
+    resp.start_section("wblogloot");
+    resp.add_val(0); // battle loot
+    resp.add_val(0); // weak point chest
+    resp.add_val(0); // kill steal chest
+    resp.add_val(0); // damage master chest
+    resp.add_val(0); // single hit chest
+
+    resp.start_section("wbupgradestore");
+
+    for i in 1..=3 {
+        resp.add_val(1); // typ
+        resp.add_val(1); // restriction
+        resp.add_val(1); // effect val 1
+
+        let price = ((i * 10_000) * 100) / 3;
+        resp.add_val(price); // main price
+        resp.add_val(10); // main type
+        resp.add_val(price); // secondary price
+        resp.add_val(price); // mushroom price
+    }
+
+    resp.start_section("wbammostore");
+    for i in 0..3 {
+        resp.add_val(i + 1);
+
+        resp.add_val(20); // small_amount
+        resp.add_val(50); // large_amount
+
+        resp.add_val(10); // effect value
+
+        resp.add_val(100); // 20x price
+        resp.add_val(250); // 50x price
+    }
+
+    resp.start_section("wblogattacks");
+
+    resp.add_val(1769173199);
+    resp.add_val(49);
+    resp.add_val(2);
+    resp.add_val(1769170381);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769169902);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769169599);
+    resp.add_val(169);
+    resp.add_val(7);
+    resp.add_val(1769169362);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769168881);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769168401);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769167861);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769167381);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769166841);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769166361);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769165999);
+    resp.add_val(152);
+    resp.add_val(7);
+    resp.add_val(1769165881);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769165342);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(2550);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769164861);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(1856);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769164321);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(1856);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769163842);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(3712);
+    resp.add_val(1);
+    resp.add_val(0);
+    resp.add_val(1769163361);
+    resp.add_val(50);
+    resp.add_val(1);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769162761);
+    resp.add_val(50);
+    resp.add_val(3);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769162399);
+    resp.add_val(99);
+    resp.add_val(6);
+    resp.add_val(1769162161);
+    resp.add_val(50);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769161622);
+    resp.add_val(50);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769161022);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769160482);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769159881);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769159281);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769158799);
+    resp.add_val(82);
+    resp.add_val(5);
+    resp.add_val(1769158682);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769158081);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769157481);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769156882);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1769156282);
+    resp.add_val(45);
+    resp.add_val(2);
+    resp.add_val(1735);
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.start_section("wbtower");
+    resp.add_val(1); // boss nr
+    resp.add_val(40); // ??
+    resp.add_val(2); // weak point
+    resp.add_val(1); // has_been_hit
+
+    for _ in 0..3 {
+        resp.add_val(740); // Signed up heroes
+        resp.add_val(23704175); // Joint damage
+        resp.add_val(62500000); // max health
+        resp.add_val(21134662); // remaining health
+
+        resp.add_val(600); // active special attacks
+
+        // most total damage
+        for _ in 0..10 {
+            resp.add_val(6969); // lvl
+            resp.add_str("username");
+        }
+
+        // Most special attacks
+        for _ in 0..3 {
+            resp.add_val(6969); // lvl
+            resp.add_str("username");
+            resp.add_val(10000); // count?
+        }
+    }
+
+    resp.start_section("wbupgrade");
+    resp.add_val(in_seconds(90));
+
+    for i in 0..4 {
+        resp.add_val(i + 1);
+        resp.add_val(2);
+        resp.add_val(9);
+        resp.add_val(10000);
+    }
+
+    resp.start_section("wbammo");
+    resp.add_val(3);
+    resp.add_val(25);
+    resp.add_val(100);
 
     resp.start_section("attbonus1(3)");
     resp.add_str("0/0/0/0");
@@ -234,7 +533,7 @@ pub(crate) async fn poll(
 
     // Attributes
     for _ in AttributeType::iter() {
-        resp.add_val(100); // 30..=34
+        resp.add_val(10000); // 30..=34
     }
 
     // attribute_additions (aggregate from equipment)
@@ -1003,7 +1302,7 @@ pub(crate) async fn poll(
         resp.add_val(exp.location_1); // location 1
         resp.add_val(exp.location_2); // location 2
         resp.add_val(exp.alu_sec); // alu
-        resp.add_val(0); // 1 => egg, 2 => inc. daily task
+        resp.add_val(1); // 1 => egg, 2 => inc. daily task
     }
 
     resp.start_section("expeditionevent");
@@ -1167,142 +1466,38 @@ pub(crate) async fn poll(
         }
     }
 
-    resp.start_section("iamap");
-    resp.add_val(25);
-    resp.add_val(-5159);
-
-    // 0 => max 0
-    // 1..=4 => max 1
-    // 5..=8 => max 2
-    // 9..=12 => max 3
-    // 13.. => max 4
-    resp.add_val(9); // Removes other?
-    // -315 => 0 / X
-    // 315 => 1 / X
-    resp.add_val(315);
-
-    resp.add_val(25);
-    resp.add_val(-5160);
-    resp.add_val(9);
-    resp.add_val(-315);
-
-    resp.add_val(25);
-    resp.add_val(-5172);
-    resp.add_val(9);
-    resp.add_val(-315);
-
-    resp.add_val(25);
-    resp.add_val(-5168);
-    resp.add_val(9);
-    resp.add_val(-315);
-
-    resp.start_section("iamerchant");
-    resp.add_val(102);
-    resp.add_val(40100);
-    resp.add_val(5);
-
-    resp.add_val(3);
-    resp.add_val(50080);
-    resp.add_val(0);
-
-    resp.start_section("iadungeonstats");
-    resp.add_val(100); // items looted
-    resp.add_val(17); // epic items looted
-    resp.add_val(300); // keys found
-    resp.add_val(1846722900); // silver found
-    resp.add_val(1); // attempts
-
-    resp.start_section("iadungeonstatstotal");
-    resp.add_val(69);
-    resp.add_val(420);
-    resp.add_val(5);
-    resp.add_val(77);
-    resp.add_val(1846722900);
-    resp.add_val(2); // Unknown
-
-    resp.start_section("iadungeon.iadungeonsave");
-
-    resp.add_val(993073103);
-
-    // Player health status?
-    resp.add_val(2); // healing hp ?
-    // 0 => healing
-    // 1 => allowed to enter?
-    // 2 => alive
-
-    resp.add_val(-511294); // current hp
-    resp.add_val(553143); // pre attack hp
-
-    resp.add_val(7642555); // total hp
-
-    resp.add_val(0); // blessing type
-    resp.add_val(0);
-    resp.add_val(0);
-
-    resp.add_val(0); // curse type?
-    resp.add_val(0);
-    resp.add_val(0);
-
-    resp.add_val(0); // blessing duration & strength
-    resp.add_val(0);
-    resp.add_val(0);
-
-    resp.add_val(0); // curse 1 duration
-
-    resp.add_val(101); // stage (15) // Finished?
-    resp.add_val(0); // stage extra?
-
-    resp.add_val(25); // current floor
-    resp.add_val(100); // max floor
-
-    resp.add_val(1); // 19 // left door & room type
-    resp.add_val(0); // 20 // right door type
-
-    resp.add_val(0);
-
-    resp.add_val(-5159); // 22 encounter type
-
-    resp.add_val(0); // appeared after death
-    resp.add_val(0);
-
-    resp.add_val(0); // trap left
-    resp.add_val(0); // trap right
-
-    // Item
-    for _ in 0..12 {
+    resp.start_section("ownplayersaveequipment");
+    for _ in 0..10 {
         resp.add_val(0);
     }
 
-    resp.add_val(1); // keys
-    resp.add_val(0); // 40
-    resp.add_val(0);
+    resp.start_section("backpack");
+    let inv_len = 5;
+    resp.add_val(10); // item type
+    resp.add_val(0); // gem slot / type
+    resp.add_val(0); // Enchantment
+    resp.add_val(35); // model id / class / sub ident
+    resp.add_val(0); // enchantment effect %
+    resp.add_val(0); // armor YES
+    resp.add_val(0); // max_attack
+    resp.add_val(4); // atr typ 1 / rune
+    resp.add_val(0); // atr typ 2 / rune
+    resp.add_val(0); // atr typ 3 / rune
 
-    resp.add_val(0); // 42
-    resp.add_val(0);
-    resp.add_val(0);
+    resp.add_val(306); // atr val 1
+    resp.add_val(0); // atr val 2
+    resp.add_val(0); // atr val 3
 
-    resp.add_val(0);
-    resp.add_val(0);
-    resp.add_val(0);
+    resp.add_val(0); // sell price
+    resp.add_val(0); // probably mushroom price
+    resp.add_val(0); // upgrade_count (blacksmith)
+    resp.add_val(0); // gem val
+    resp.add_val(0); // item quality NO
+    resp.add_val(0); // is_washed NO
 
-    resp.add_val(0);
-    resp.add_val(0); // 49
-
-    resp.start_section("iadungeontime");
-    resp.add_val(1);
-    resp.add_val(in_seconds(-600));
-    resp.add_val(in_seconds(6000));
-    resp.add_val(in_seconds(6000 + ((60 * 60) * 24)));
-
-    resp.start_section("iadungeon20cost");
-    resp.add_str("10");
-
-    // 18 =>
-    resp.start_section("iadungeonsoulstones");
-    resp.add_str("0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0");
-    resp.add_str("4/1/1/0/0/30");
-    resp.add_str("5/10/1/0/0/31");
-    resp.add_str("6/30/1/0/0/32");
+    for _ in 0..(inv_len - 1) {
+        resp.add_val(0);
+    }
 
     // resp.add_key("pendingrewards");
     // for i in 0..10 {

@@ -86,6 +86,8 @@ pub(crate) async fn handle_command<'a>(
         "UserSettingsUpdate" => Ok(ServerResponse::Success), // TODO:
         "getserverversion" => get_server_version(session, db).await,
         "ExpeditionStart" => player_start_expedition(session, db, args).await,
+        "WorldBossEventPoll" | "WorldBossEnter" => poll(session, "", db, Default::default()).await,
+        "WorldBossLogRewards" | "WorldBossLogDayInfos" => Ok(ServerResponse::Success),
         _ => {
             error!("Unknown command: {name} - {args:?}");
             Err(ServerError::UnknownRequest(name.into()))
