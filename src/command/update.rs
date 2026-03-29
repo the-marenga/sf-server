@@ -208,7 +208,7 @@ pub(crate) async fn poll(
 
     // The chest we got
     resp.start_section("wbdailychests");
-    resp.add_val(1);
+    resp.add_val(0);
     resp.add_val(1);
     resp.add_val(1);
     resp.add_val(1);
@@ -222,14 +222,14 @@ pub(crate) async fn poll(
 
     resp.start_section("wbupgradestore");
 
-    for i in 1..=3 {
+    for _ in 1..=3 {
         resp.add_val(1); // typ
         resp.add_val(1); // restriction
         resp.add_val(1); // effect val 1
 
-        let price = ((i * 10_000) * 100) / 3;
+        let price = 1; // ((i * 10_000) * 100) / 3;
         resp.add_val(price); // main price
-        resp.add_val(10); // main type
+        resp.add_val(4); // main type
         resp.add_val(price); // secondary price
         resp.add_val(price); // mushroom price
     }
@@ -438,7 +438,6 @@ pub(crate) async fn poll(
         resp.add_val(23704175); // Joint damage
         resp.add_val(62500000); // max health
         resp.add_val(21134662); // remaining health
-
         resp.add_val(600); // active special attacks
 
         // most total damage
@@ -456,19 +455,19 @@ pub(crate) async fn poll(
     }
 
     resp.start_section("wbupgrade");
-    resp.add_val(in_seconds(90));
+    resp.add_val(in_seconds((60 * 60 * 10) / 2));
 
     for i in 0..4 {
         resp.add_val(i + 1);
         resp.add_val(2);
-        resp.add_val(9);
+        resp.add_val(1);
         resp.add_val(10000);
     }
 
     resp.start_section("wbammo");
-    resp.add_val(3);
-    resp.add_val(25);
-    resp.add_val(100);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
 
     resp.start_section("attbonus1(3)");
     resp.add_str("0/0/0/0");
@@ -986,7 +985,7 @@ pub(crate) async fn poll(
     resp.start_section("resources");
     resp.add_val(session.player_id); // pid
     resp.add_val(char.mushrooms); // mushrooms
-    resp.add_val(char.silver); // silver
+    resp.add_val(char.silver + 10000000); // silver
     resp.add_val(0); // lucky coins
     resp.add_val(char.quicksand); // quicksand glasses
     resp.add_val(0); // wood
