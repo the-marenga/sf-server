@@ -1,7 +1,5 @@
 use sf_api::{
-    command::AttributeType,
-    gamestate::{items::EquipmentSlot, rewards::Event},
-    misc::to_sf_string,
+    command::AttributeType, gamestate::items::EquipmentSlot, misc::to_sf_string,
 };
 use sqlx::Sqlite;
 use strum::IntoEnumIterator;
@@ -1465,10 +1463,16 @@ pub(crate) async fn poll(
         }
     }
 
-    resp.start_section("ownplayersaveequipment");
-    for _ in 0..10 {
-        resp.add_val(0);
-    }
+
+    resp.start_section("events");
+    resp.add_val(7);
+    resp.add_val(147796);
+    resp.add_val(1774828740);
+    resp.add_val(2097153);
+    resp.add_val(1775519940);
+    resp.add_val(20);
+    resp.add_val(5);
+    resp.add_val(2097152);
 
     resp.start_section("backpack");
     let inv_len = 5;
@@ -1507,6 +1511,484 @@ pub(crate) async fn poll(
     //     resp.add_val(1717777586);
     //     resp.add_val(1718382386);
     // }
+
+    resp.start_section("iadungeonchances");
+    resp.add_val(0);
+    resp.add_val(20);
+    resp.add_val(1);
+    resp.add_val(200);
+    resp.add_val(2);
+    resp.add_val(0);
+    resp.add_val(3);
+    resp.add_val(400);
+    resp.add_val(4);
+    resp.add_val(400);
+    resp.add_val(5);
+    resp.add_val(400);
+    resp.add_val(6);
+    resp.add_val(400);
+    resp.add_val(7);
+    resp.add_val(400);
+    resp.add_val(8);
+    resp.add_val(400);
+    resp.add_val(9);
+    resp.add_val(400);
+    resp.add_val(10);
+    resp.add_val(400);
+    resp.add_val(11);
+    resp.add_val(200);
+    resp.add_val(12);
+    resp.add_val(0);
+    resp.add_val(13);
+    resp.add_val(800);
+    resp.add_val(14);
+    resp.add_val(800);
+    resp.add_val(15);
+    resp.add_val(800);
+    resp.add_val(16);
+    resp.add_val(800);
+    resp.add_val(17);
+    resp.add_val(800);
+    resp.add_val(18);
+    resp.add_val(800);
+    resp.add_val(19);
+    resp.add_val(800);
+    resp.add_val(20);
+    resp.add_val(800);
+
+    resp.start_section("iadungeonsoulstones");
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(9);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(-15);
+    resp.add_val(18);
+    resp.add_val(7);
+    resp.add_val(40);
+    resp.add_val(-20);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(24);
+    resp.add_val(18);
+    resp.add_val(10);
+    resp.add_val(20);
+    resp.add_val(31);
+    resp.add_val(1);
+    resp.add_val(0);
+
+    resp.start_section("iadungeontime");
+    resp.add_val(3);
+    resp.add_val(1774630800);
+    resp.add_val(1775505600);
+    resp.add_val(1775592000);
+
+    resp.start_section("iadungeon");
+    resp.add_val(299715687);
+    resp.add_val(2);
+    resp.add_val(4074729);
+    resp.add_val(4074729);
+    resp.add_val(24939872);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(12);
+    resp.add_val(0);
+    resp.add_val(25);
+    resp.add_val(100);
+    resp.add_val(4);
+    resp.add_val(900);
+    resp.add_val(904);
+    resp.add_val(-5236);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.start_section("iadungeon20cost");
+    resp.add_val(10);
+
+    resp.start_section("iadungeonstats");
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(5);
+    resp.add_val(1463932930);
+    resp.add_val(1);
+
+    resp.start_section("iadungeonstatstotal");
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(6);
+    resp.add_val(1);
+    resp.add_val(1463932930);
+    resp.add_val(0);
+
+    resp.start_section("adventure");
+    resp.add_val(198);
+    resp.add_val(198);
+    resp.add_val(360);
+    resp.add_val(4);
+    resp.add_val(-134);
+    resp.add_val(15);
+    resp.add_val(210);
+    resp.add_val(943848);
+    resp.add_val(43042200);
+    resp.add_val(360);
+    resp.add_val(1);
+    resp.add_val(-29);
+    resp.add_val(10);
+    resp.add_val(210);
+    resp.add_val(937611);
+    resp.add_val(69372600);
+    resp.add_val(360);
+    resp.add_val(2);
+    resp.add_val(-4);
+    resp.add_val(21);
+    resp.add_val(420);
+    resp.add_val(1773353);
+    resp.add_val(134964000);
+
+    resp.start_section("ownplayersavecharacter");
+    resp.add_val(1165808075);
+    resp.add_val(session.player_id);
+    resp.add_val(0);
+    resp.add_val(char.level);
+    resp.add_val(char.experience);
+    resp.add_val(xp_for_next_level(level));
+    resp.add_val(honor);
+    resp.add_val(rank);
+    resp.add_val(char.mouth); // mouth
+    resp.add_val(char.hair); // hair
+    resp.add_val(char.brows); // brows
+    resp.add_val(char.eyes); // eyes
+    resp.add_val(char.beards); // beards
+    resp.add_val(char.nose); // nose
+    resp.add_val(char.ears); // ears
+    resp.add_val(char.extra); // extra
+    resp.add_val(char.horns); // horns
+    resp.add_val(char.influencer); // influencer
+    resp.add_val(char.race); // race
+    resp.add_val(char.gender); // Gender & Mirror
+    resp.add_val(char.class); // class
+    resp.add_val(char.mount);
+    resp.add_val(0);       // ???
+    resp.add_val(10531);   // armor
+    resp.add_val(705);     // min dmg
+    resp.add_val(1625);    // max dmg
+    resp.add_val(25);      // portal damage_bonus
+    resp.add_val(5507416); // ????
+    resp.add_val(33);      // hp bonus
+    resp.add_val(char.mount_end);
+
+    for _ in AttributeType::iter() {
+        resp.add_val(10000);
+    }
+    // attribute_additions (aggregate from equipment)
+    for _ in AttributeType::iter() {
+        resp.add_val(0);
+    }
+    // attribute_times_bought
+    for _ in AttributeType::iter() {
+        resp.add_val(0);
+    }
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(38);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(26);
+    resp.add_val(7);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);        // guild id
+    resp.add_val(12138);    // scrapbook count
+    resp.add_val(1);
+    resp.add_val(31);
+    resp.add_val(15);       // gladiators
+
+    resp.start_section("characterstatus");
+    resp.add_val(1);
+
+    resp.add_val(0); // Current action
+    resp.add_val(0); // Secondary (time busy)
+    resp.add_val(char.busy_until); // Busy until
+    resp.add_val(0); // Busy since?
+
+    resp.add_val(11); // total beer
+    resp.add_val(char.tfa);     // alu
+    resp.add_val(0);    // beer drunk
+    resp.add_val(1);    // calendar collected
+    resp.add_val(1774828801); // calendar next
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(0);
+    resp.add_val(2463);         // ???
+    resp.add_val(1386953147);   // acc creation time?
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1597743456);   // next free pet exp
+    resp.add_val(1774762235);   // next dungeon fight
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.start_section("vipstatus");
+    resp.add_val(0);
+
+    resp.start_section("ownplayersavepotions");
+    resp.add_val(470832);
+    resp.add_val(4);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1775017827);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(10);
+    resp.add_val(0);
+    resp.add_val(0);
+
+    resp.start_section("arena");
+    resp.add_val(1774760391);
+    resp.add_val(0);
+    resp.add_val(346900);
+    resp.add_val(24475);
+    resp.add_val(303528);
+    resp.add_val(1);
+
+    resp.start_section("dice");
+    resp.add_val(1774762130);
+    resp.add_val(18);
+
+    resp.start_section("wheel");
+    resp.add_val(2);
+    resp.add_val(10);
+    resp.add_val(1774828801);
+
+    resp.start_section("fortress");
+    resp.add_val(19);
+    resp.add_val(15);
+    resp.add_val(18);
+    resp.add_val(18);
+    resp.add_val(17);
+    resp.add_val(18);
+    resp.add_val(15);
+    resp.add_val(15);
+    resp.add_val(15);
+    resp.add_val(17);
+    resp.add_val(18);
+    resp.add_val(17);
+    resp.add_val(10);
+    resp.add_val(1775478676);
+    resp.add_val(1774758676);
+    resp.add_val(373);
+    resp.add_val(7005);
+    resp.add_val(1568);
+    resp.add_val(1774759003);
+    resp.add_val(535684);
+    resp.add_val(1459278099);
+    resp.add_val(1774783551);
+    resp.add_val(13);
+    resp.add_val(1771874051);
+    resp.add_val(1771848851);
+    resp.add_val(18);
+    resp.add_val(535684);
+
+    resp.start_section("fortressunits");
+    resp.add_val(13);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(32);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1774760996);
+    resp.add_val(1771054177);
+    resp.add_val(1771054177);
+    resp.add_val(1774761241);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(18);
+    resp.add_val(18);
+    resp.add_val(18);
+
+    resp.start_section("fortressGroupPrice");
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(132000000);
+    resp.add_val(43200000);
+
+    resp.start_section("fortressstorage");
+    resp.add_val(2563619);
+    resp.add_val(854534);
+    resp.add_val(4756824);
+    resp.add_val(4050000);
+    resp.add_val(1350000);
+    resp.add_val(4756824);
+    resp.add_val(165000000);
+    resp.add_val(54000000);
+    resp.add_val(150000);
+    resp.add_val(50000);
+    resp.add_val(440445);
+    resp.add_val(1774758678);
+    resp.add_val(300000000);
+    resp.add_val(100000000);
+    resp.add_val(49500000);
+    resp.add_val(16200000);
+
+    resp.start_section("fortresschances");
+    resp.add_val(10000);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1700);
+    resp.add_val(8300);
+
+    resp.start_section("fortresspricereroll");
+    resp.add_val(35705681);
+
+    resp.start_section("fortressprice");
+    resp.add_val(1296000);
+    resp.add_val(20000);
+    resp.add_val(165000000);
+    resp.add_val(54000000);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1209600);
+    resp.add_val(3800);
+    resp.add_val(22500000);
+    resp.add_val(15000000);
+    resp.add_val(1209600);
+    resp.add_val(5700);
+    resp.add_val(67500000);
+    resp.add_val(12000000);
+    resp.add_val(1123200);
+    resp.add_val(27000);
+    resp.add_val(50000000);
+    resp.add_val(17500000);
+    resp.add_val(1209600);
+    resp.add_val(13300);
+    resp.add_val(18000000);
+    resp.add_val(24000000);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(720000);
+    resp.add_val(37500);
+    resp.add_val(5760000);
+    resp.add_val(1872000);
+    resp.add_val(1209600);
+    resp.add_val(7600);
+    resp.add_val(45000000);
+    resp.add_val(15000000);
+    resp.add_val(1123200);
+    resp.add_val(270000);
+    resp.add_val(30000000);
+    resp.add_val(14000000);
+    resp.add_val(25200);
+    resp.add_val(255000);
+    resp.add_val(1367500);
+    resp.add_val(450000);
+
+    resp.start_section("deedsandtitlesplayersave");
+    resp.add_val(470832);
+    resp.add_val(320);
+    resp.add_val(3254);
+    resp.add_val(16);
+    resp.add_val(6);
+    resp.add_val(1);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(1);
+    resp.add_val(94);
+    resp.add_val(0);
+    resp.add_val(118);
+    resp.add_val(0);
+    resp.add_val(119);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
+    resp.add_val(0);
 
     tx.commit().await?;
 
