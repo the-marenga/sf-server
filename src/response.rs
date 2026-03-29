@@ -59,7 +59,7 @@ pub struct ResponseBuilder {
 }
 
 impl ResponseBuilder {
-    pub fn add_key(&mut self, key: &str) -> &mut ResponseBuilder {
+    pub fn start_section(&mut self, key: &str) -> &mut ResponseBuilder {
         if !self.resp.is_empty() {
             self.resp.push('&')
         }

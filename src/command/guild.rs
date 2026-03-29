@@ -82,7 +82,7 @@ pub(crate) async fn group_get_hof(
     }
 
     ResponseBuilder::default()
-        .add_key("ranklistgroup.r")
+        .start_section("ranklistgroup.r")
         .add_str(&guilds)
         .build()
 }
